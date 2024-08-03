@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -31,8 +31,6 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
- *
  * Description: RDMA Controller HW interface (header)
  */
 
@@ -54,7 +52,7 @@
 #define RCFW_DBR_BASE_PAGE_SHIFT	12
 #define RCFW_MAX_LATENCY_SEC_SLAB_INDEX	128
 #define RCFW_MAX_LATENCY_MSEC_SLAB_INDEX	3000
-#define RCFW_MAX_STAT_INDEX	0xFFFF
+#define RCFW_MAX_STAT_INDEX	0x3FFFF
 #define	RCFW_FW_STALL_MAX_TIMEOUT	40
 
 extern unsigned int cmdq_shadow_qd;

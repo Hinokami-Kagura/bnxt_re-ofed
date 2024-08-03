@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2022, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -190,15 +190,6 @@ int bnxt_re_setup_dcb(struct bnxt_re_dev *rdev,
 		dev_err(rdev_to_dev(rdev), "Failed to query port config rc:%d",
 			rc);
 		return rc;
-	}
-
-	if (dev->dcbnl_ops->ieee_getets) {
-		rc = dev->dcbnl_ops->ieee_getets(dev, &ets);
-		if (rc) {
-			dev_err(rdev_to_dev(rdev), "Failed to getets rc:%d",
-				rc);
-			return rc;
-		}
 	}
 
 	if (dev->dcbnl_ops->ieee_getpfc) {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,8 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
  *
  * Description: IB Verbs interpreter (header)
  */
@@ -97,11 +95,14 @@ struct bnxt_re_ah {
 struct bnxt_re_srq {
 	struct ib_srq		ib_srq;
 	struct list_head	dbr_list;
+	struct list_head	srq_list;
+	struct bnxt_re_ucontext *uctx;
 	struct bnxt_re_dev	*rdev;
 	u32			srq_limit;
 	struct bnxt_qplib_srq	qplib_srq;
 	struct ib_umem		*umem;
 	spinlock_t		lock;
+	void			*uctx_srq_page;
 };
 
 union ip_addr {
@@ -159,7 +160,7 @@ struct bnxt_re_cq {
 	/* list of cq per uctx. Used only for Thor-2 */
 	void			*uctx_cq_page;
 	void			*dbr_recov_cq_page;
-	bool			is_dbr_recov_cq;
+	bool			is_dbr_soft_cq;
 };
 
 struct bnxt_re_mr {
@@ -181,9 +182,6 @@ struct bnxt_re_mr {
 
 struct bnxt_re_frpl {
 	struct bnxt_re_dev		*rdev;
-#ifdef HAVE_IB_FAST_REG_MR
-	struct ib_fast_reg_page_list	ib_frpl;
-#endif
 	struct bnxt_qplib_frpl		qplib_frpl;
 	u64				*page_list;
 };
@@ -217,6 +215,7 @@ struct bnxt_re_ucontext {
 	struct bnxt_re_dev	*rdev;
 	struct list_head	dbr_list;
 	struct list_head	cq_list;
+	struct list_head	srq_list;
 	struct bnxt_qplib_dpi	dpi;
 	struct bnxt_qplib_dpi	wcdpi;
 	void			*shpg;
@@ -229,6 +228,7 @@ struct bnxt_re_ucontext {
 #endif
 	uint64_t		cmask;
 	struct mutex		cq_lock;	/* Protect cq list */
+	struct mutex		srq_lock;	/* Protect srq list */
 	void			*dbr_recov_cq_page;
 	struct bnxt_re_cq	*dbr_recov_cq;
 	void			*hdbr_app;
@@ -268,7 +268,7 @@ int bnxt_re_get_port_immutable(struct ib_device *ibdev, PORT_NUM port_num,
 			       struct ib_port_immutable *immutable);
 #endif
 #ifdef HAVE_IB_GET_DEV_FW_STR
-void bnxt_re_compat_qfwstr(void);
+void bnxt_re_query_fw_str(struct ib_device *ibdev, char *str, size_t str_len);
 #endif
 int bnxt_re_query_pkey(struct ib_device *ibdev, PORT_NUM port_num,
 		       u16 index, u16 *pkey);
@@ -407,38 +407,11 @@ struct ib_mr *bnxt_re_alloc_mr(struct ib_pd *ib_pd, enum ib_mr_type mr_type,
 #endif
 			       );
 #endif
-#ifdef HAVE_IB_REG_PHYS_MR
-struct ib_mr *bnxt_re_reg_phys_mr(struct ib_pd *pd,
-				  struct ib_phys_buf *phys_buf_array,
-				  int num_phys_buf, int mr_access_flags,
-				  u64 *iova_start);
-int bnxt_re_rereg_phys_mr(struct ib_mr *ib_mr, int mr_rereg_mask,
-			  struct ib_pd *ib_pd,
-			  struct ib_phys_buf *phys_buf_array,
-			  int num_phys_buf, int mr_access_flags,
-			  u64 *iova_start);
-#endif
-#ifdef HAVE_IB_QUERY_MR
-int bnxt_re_query_mr(struct ib_mr *mr, struct ib_mr_attr *mr_attr);
-#endif
 int bnxt_re_dereg_mr(struct ib_mr *mr
 #ifdef HAVE_DEREG_MR_UDATA
 		, struct ib_udata *udata
 #endif
 		);
-#ifdef HAVE_IB_SIGNATURE_HANDOVER
-int bnxt_re_destroy_mr(struct ib_mr *mr);
-struct ib_mr *bnxt_re_create_mr(struct ib_pd *pd,
-				struct ib_mr_init_attr *mr_init_attr);
-#endif
-#ifdef HAVE_IB_FAST_REG_MR
-struct ib_mr *bnxt_re_alloc_fast_reg_mr(struct ib_pd *pd,
-					int max_page_list_len);
-struct ib_fast_reg_page_list *bnxt_re_alloc_fast_reg_page_list(
-						struct ib_device *ibdev,
-						int page_list_len);
-void bnxt_re_free_fast_reg_page_list(struct ib_fast_reg_page_list *page_list);
-#endif
 #ifdef HAVE_IB_MW_TYPE
 ALLOC_MW_RET bnxt_re_alloc_mw
 #ifndef HAVE_ALLOC_MW_IN_IB_CORE
@@ -453,19 +426,7 @@ ALLOC_MW_RET bnxt_re_alloc_mw
 #else
 ALLOC_MW_RET bnxt_re_alloc_mw(struct ib_pd *ib_pd);
 #endif
-#ifdef HAVE_IB_BIND_MW
-int bnxt_re_bind_mw(struct ib_qp *qp, struct ib_mw *mw,
-		    struct ib_mw_bind *mw_bind);
-#endif
 int bnxt_re_dealloc_mw(struct ib_mw *mw);
-#ifdef HAVE_IB_FM
-struct ib_fmr *bnxt_re_alloc_fmr(struct ib_pd *pd, int mr_access_flags,
-				 struct ib_fmr_attr *fmr_attr);
-int bnxt_re_map_phys_fmr(struct ib_fmr *fmr, u64 *page_list, int list_len,
-			 u64 iova);
-int bnxt_re_unmap_fmr(struct list_head *fmr_list);
-int bnxt_re_dealloc_fmr(struct ib_fmr *fmr);
-#endif
 struct ib_mr *bnxt_re_reg_user_mr(struct ib_pd *pd, u64 start, u64 length,
 				  u64 virt_addr, int mr_access_flags,
 				  struct ib_udata *udata);
@@ -475,10 +436,12 @@ struct ib_mr *bnxt_re_reg_user_mr_dmabuf(struct ib_pd *ib_pd, u64 start,
 					 int fd, int mr_access_flags,
 					 struct ib_udata *udata);
 #endif
+#ifdef HAVE_IB_REREG_USER_MR
 REREG_USER_MR_RET
 bnxt_re_rereg_user_mr(struct ib_mr *mr, int flags, u64 start, u64 length,
 		      u64 virt_addr, int mr_access_flags, struct ib_pd *pd,
 		      struct ib_udata *udata);
+#endif
 
 ALLOC_UCONTEXT_RET bnxt_re_alloc_ucontext(ALLOC_UCONTEXT_IN *uctx_in,
 					  struct ib_udata *udata);

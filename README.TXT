@@ -34,7 +34,7 @@ Introduction
 ============
 
 This file describes the bnxt_re Linux RoCE driver for the Broadcom NetXtreme-C
-and NetXtreme-E 10/25/40/50/100/200 Gbps Ethernet Network Controllers.
+and NetXtreme-E 10/25/40/50/100/200/400 Gbps Ethernet Network Controllers.
 
 Note: Starting from 219.0 release, driver supports only RoCE v2.
 RoCE v1 support is deprecated. Please refer Broadcom Linux RoCE Configuration
@@ -56,7 +56,7 @@ bnxt_re driver compilation depends on whether IB stack is available along with
 the OS distribution or an external OFED is required.
 
  => Distros that has IB Stack available along with OS distribution:
-    RH7.1/7.2/7.3/6.7/6.8, RH8.x, SLES12SPx,SLES15SPx  and Ubuntu 16.04/14.04 and later.
+    RH 7.9, 8.x, RH 9.x, SLES12SPx, SLES15SPx, Ubuntu 20.04, Ubuntu 22.04.
     All kernels from 4.5.x onwards
 
 To compile bnxt_re:
@@ -103,7 +103,7 @@ Configuration Tips
   commands like taskset etc.
 
 - To avoid the SQ full reported during iSER stress testing (kernels SLES 12 and later,
-  RHEL 7.4 and later), configure the minimum tx depth for the QPs to 4096.
+  RHEL 8.x and later), configure the minimum tx depth for the QPs to 4096.
   All connections getting established after setting min_tx_depth uses the user specified values.
 
   echo 4096 > /sys/kernel/config/bnxt_re/bnxt_re0/ports/1/tunables/min_tx_depth
@@ -122,10 +122,6 @@ Configuration Tips
    For multiple instances of ib_send_bw/ib_read_bw/ib_write_bw, which creates
    total of 64K QPs, specify higher ack timeout in each application instance
    using -u 24.
-- "restrict_mrs" module parameter is used to limit the number of MRs supported
-  by the driver. For now the parameter applies only to 574xx devices.
-  Setting this flag to 1 would reduce the number for MRs supported by the device
-  to 64K.
 
 Limitations
 ===========
@@ -314,10 +310,11 @@ DCB Settings
 ============
 
 The users can change the above default values using bnxt_setupcc.sh or
-other tools. PFC settings can be configured with bnxtqos or lldptool
+other tools. PFC settings can be configured with bnxtqos/niccli/lldptool etc.
 While adding new settings, please make sure that the default settings
-(say, app TLVs) are removed, before programming the new values.
-Refer bnxt_setupcc.sh for usage of lldptool/bnxtqos and configfs.
+(say, app TLVs, ETS configuration, PFC config etc) are removed, before programming
+the new values. Refer the below section "Removing the RoCE Driver default DCB settings"
+to remove the default RoCE configurations.
 
 Note: Since bnxt_re driver enables PFC on ROCE Priority during driver load,
       PFC must be disabled using bnxtqos/lldptool before changing any TC
@@ -326,8 +323,9 @@ Note: Since bnxt_re driver enables PFC on ROCE Priority during driver load,
 
 Note: Unloading bnxt_re driver would change the current DCBx settings on
       the adapter. This might include some of the settings done by users
-      after loading bnxt_re. If bnxt_re is unloaded after the user changes
-      settings, please clear all DCBx settings before loading bnxt_re again.
+      after loading bnxt_re. This is applicable to LAG create/delete operation.
+      i.e. User has to clear and re-configure DCB settings after unload/load of
+      the bnxt_re driver or create/destroy of the RoCE LAG.
 
       To confirm the dcbx settings,  use bnxtqos or lldptool as following.
 
@@ -464,6 +462,45 @@ bnxtqos -dev=enp37s0f0np0 set_apptlv app=6,5,54
 bnxtqos -dev=enp37s0f0np0 set_apptlv app=6,5,55
 bnxtqos -dev=enp37s0f0np0 set_apptlv app=6,5,49
 
+Removing the RoCE Driver default DCB settings
+---------------------------------------------
+RoCE driver gets auto loaded by a udev rule as soon as L2 interface is detected.
+If users want to change the Traffic class mapping using tools like tc qdisc,
+lldptool, bnxtqos, niccli etc, remove the existing settings configured
+by RoCE driver to avoid Traffic class mapping errors.
+
+Use the following commands as reference to remove the settings
+configured by RoCE driver. Users can setup new configuration after this.
+
+#Example commands using niccli ( Get the interface id from command 'niccli.x86_64 --list')
+
+#Conifgure only 1 traffic class
+niccli.x86_64 -i 5 set_ets tsa=0:strict,1:strict,2:strict priority2tc=0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0 tcbw=100
+#Disable PFC
+niccli.x86_64 -i 5 set_pfc enabled=none
+#Delete the app TLVs configured by RoCE driver
+niccli.x86_64 -i 5 set_apptlv -d app=7,5,48
+niccli.x86_64 -i 5 set_apptlv -d app=3,5,26
+niccli.x86_64 -i 5 set_apptlv -d app=3,3,4791
+
+#Example commands using bnxtqos
+
+bnxtqos -dev=ens7f0np0 set_ets tsa=0:strict,1:strict,2:strict priority2tc=0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0 tcbw=100
+bnxtqos -dev=ens7f0np0 set_pfc enabled=none
+bnxtqos -dev=ens7f0np0 set_apptlv -d app=7,5,48
+bnxtqos -dev=ens7f0np0 set_apptlv -d app=3,5,26
+bnxtqos -dev=ens7f0np0 set_apptlv -d app=3,3,4791
+
+#Example commands using lldptool
+lldptool -T -i ens7f0np0 -V ETS-CFG tsa="0:strict,1:strict,2:strict" up2tc=0:0,1:0,2:0,3:0,4:0,5:0,6:0,7:0  tcbw=100
+lldptool -T -i ens7f0np0 -V PFC enabled=none
+lldptool -T -i ens7f0np0 -V APP -d app=7,5,48
+lldptool -T -i ens7f0np0 -V APP -d app=3,5,26
+lldptool -T -i ens7f0np0 -V APP -d app=3,3,479
+
+Note: Users can also avoid auto-loading of bnxt_re driver by disabling the udev rule in
+/usr/lib/udev/rules.d/90-rdma-hw-modules.rules
+
 Congestion Control
 ===================
 
@@ -540,7 +577,7 @@ kernel. Following are the steps to configure congestion control parameters.
 
 SR-IOV and VF Resource Distribution
 ===================================
-RDMA SR-IOV is supported on BCM575xx devices only, with NPAR disabled.
+RDMA SR-IOV is supported on BCM575xx and BCM576xx devices only, with NPAR disabled.
 
 Note: Before enabling the VFs, both bnxt_en and bnxt_re drivers should be loaded.
       Loading bnxt_re driver after creating VFs is not supported. Removal of bond
@@ -787,6 +824,10 @@ Tx Pkts		Number of RoCE packets transmitted
 Tx Bytes	Number of RoCE bytes transmitted
 
 Congestion Notification Counters:
+
+Note: CNP counters are per port counter for Gen P5 and P7 adapters.
+PF counters increments for VF CNP packets also.
+
 CNP Tx Pkts	Number of RoCE CNP packets received
 CNP Tx Bytes	Number of RoCE CNP bytes received
 CNP Rx Pkts	Number of RoCE CNP packets transmitted

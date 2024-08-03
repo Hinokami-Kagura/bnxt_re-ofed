@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,8 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
  *
  * Description: DebugFS header
  */

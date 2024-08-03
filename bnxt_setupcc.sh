@@ -17,9 +17,10 @@ Usage: $(basename "$0") [OPTION]...
   -p VALUE    RoCE CNP Packet DSCP Value
   -b VALUE    RoCE Bandwidth percentage for ETS configuration - Default is 50%
   -t [2]      Default mode (Only RoCE v2 is supported - Input Ignored)
-  -u [1-2]    Utility to configure QoS settings
+  -u [1-3]    Utility to configure QoS settings
 	      1 - Use bnxtqos utility (default)
               2 - Use lldptool
+	      3 - Use Broadcom niccli utility
   -h          display help
 EOM
 exit 2
@@ -107,23 +108,30 @@ fi
 
 if [ -z "${u}" ] || [ "$u" == 1 ]
 then
-	USE_BNXTQOS=1
+	QOS_TOOL=1
 elif [ "$u" == 2 ]
 then
-	USE_BNXTQOS=0
+	QOS_TOOL=2
+elif [ "$u" == 3 ]
+then
+	QOS_TOOL=3
 else
 	echo "Invalid utility selected (-u option)"
 	usage
 	exit 1
 fi
 
-if [ $USE_BNXTQOS -eq 1 ]
+if [ $QOS_TOOL -eq 1 ]
 then
 	type bnxtqos >/dev/null 2>&1 ||
 	       { echo >&2 "bnxtqos utility is not installed.  Aborting."; exit 1; }
-else
+elif [ $QOS_TOOL -eq 2 ]
+then
 	type lldptool >/dev/null 2>&1 ||
 	       { echo >&2 "lldptool is not installed.  Aborting."; exit 1; }
+else
+	type niccli >/dev/null 2>&1 ||
+	       { echo >&2 "niccli is not installed.  Aborting."; exit 1; }
 fi
 
 EN_ROCE_DSCP=0
@@ -221,6 +229,25 @@ INF_NAME2=`echo $i |cut -d ' ' -f2`
 if [[ "$INF_NAME1" == "$INF_NAME2" ]];
 then
 	INF_NAME2=
+fi
+
+if [ ! -f /sys/class/net/${INF_NAME1}/address ];
+then
+  echo Interface ${INF_NAME1} not found
+  exit 1
+fi
+
+INF_MACADDR1=`cat /sys/class/net/${INF_NAME1}/address`
+
+if [ "$INF_NAME2" != "" ];
+then
+  if [ ! -f /sys/class/net/${INF_NAME2}/address ];
+  then
+    echo Interface ${INF_NAME2} not found
+    exit 1
+  fi
+
+  INF_MACADDR2=`cat /sys/class/net/${INF_NAME2}/address`
 fi
 
 if [ -z $m ]
@@ -359,6 +386,34 @@ lldptool_rem_app_tlvs() {
 	done
 }
 
+niccli_rem_app_tlv() {
+	INF_MACADDR=$1
+	j=0
+	for i in `niccli -dev $INF_MACADDR getqos|grep -e \
+                  "Priority:" -e "Sel:" -e DSCP -e UDP -e "Ethertype:"|awk -F":" '{ print $2}'`
+	do
+		if [ $i == 0x8915 ]
+		then
+			i=35093
+	fi
+
+	if [ $j -eq 0 ]
+	then
+		APP_0=$i
+	else
+		APP_0=$APP_0,$i
+	fi
+
+	j=`expr $j + 1`
+
+	if [ $j -eq 3 ]
+	then
+		niccli -dev $INF_MACADDR set_apptlv -d app=$APP_0
+		j=0
+	fi
+	done
+}
+
 bnxt_qos_pgm_pfc_ets() {
 	INF_NAME=$1
 	echo "Setting pfc/ets on $INF_NAME"
@@ -366,7 +421,13 @@ bnxt_qos_pgm_pfc_ets() {
 	# bnxtqos requires nvm cfg 155,255,269 and 270 to be disabled
 	if [ $CNP_SERVICE_TYPE -eq 1 ]
 	then
-		bnxtqos -dev=$INF_NAME set_ets tsa=0:ets,1:ets,2:strict,3:strict,4:strict,5:strict,6:strict,7:strict priority2tc=$pri2tc tcbw=$L2_BW,$ROCE_BW
+		bnxtqos -dev=$INF_NAME set_ets tsa=0:ets,1:ets,2:strict,3:strict,4:strict,5:strict,6:strict,7:strict priority2tc=$pri2tc tcbw=$L2_BW,$ROCE_BW > /dev/null 2>&1
+		if [ $? -ne 0 ]
+                then
+                        echo " Does not support 8 TCs. Configuring 3 TCs "
+                        bnxtqos -dev=$INF_NAME set_ets tsa=0:ets,1:ets,2:strict priority2tc=$pri2tc tcbw=$L2_BW,$ROCE_BW
+		fi
+
 	else
 		bnxtqos -dev=$INF_NAME set_ets tsa=0:ets,1:ets priority2tc=$pri2tc tcbw=$L2_BW,$ROCE_BW
 	fi
@@ -418,7 +479,59 @@ lldptool_pgm_pfc_ets() {
 	fi
 }
 
-if [ $USE_BNXTQOS -eq 1 ]
+niccli_pgm_pfc_ets() {
+	INF_MACADDR=$1
+	echo "Setting pfc/ets $INF_MACADDR"
+
+	niccli_rem_app_tlv $INF_MACADDR
+
+	if [ $CNP_SERVICE_TYPE -eq 1 ]
+	then
+		niccli \
+                    -dev $INF_MACADDR set_ets \
+                    tsa=0:ets,1:ets,2:strict,3:strict,4:strict,5:strict,6:strict,7:strict \
+                    priority2tc=$pri2tc \
+                    tcbw=$L2_BW,$ROCE_BW > /dev/null 2>&1
+		if [ $? -ne 0 ]
+                then
+                        echo " Does not support 8 TCs. Configuring 3 TCs "
+                        niccli -dev $INF_MACADDR set_ets \
+                            tsa=0:ets,1:ets,2:strict \
+                            priority2tc=$pri2tc tcbw=$L2_BW,$ROCE_BW
+                fi
+
+	else
+		niccli -dev $INF_MACADDR set_ets tsa=0:ets,1:ets \
+                    priority2tc=$pri2tc tcbw=$L2_BW,$ROCE_BW
+	fi
+
+	if [ ! -z "$ROCE_PRI" ] && [ $ENABLE_PFC -eq 1 ]
+	then
+		niccli -dev $INF_MACADDR set_pfc enabled=`printf "%d" $ROCE_PRI`
+		sleep 1
+		niccli -dev $INF_MACADDR set_apptlv app=`printf "%d" $ROCE_PRI`,3,4791
+		sleep 1
+	else
+		niccli -dev $INF_MACADDR set_pfc enabled=none
+	fi
+
+	if [ $ENABLE_DSCP_BASED_PFC -eq 1 ] || [ $EN_ROCE_DSCP -eq 1 ]
+	then
+		niccli -dev $INF_MACADDR set_apptlv \
+                    app=`printf "%d" $ROCE_PRI`,5,`printf "%d" $ROCE_DSCP`
+		sleep 1
+	fi
+	if [ $ENABLE_CC -eq 1 ] &&  [ $CNP_SERVICE_TYPE -eq 1 ]
+	then
+		niccli -dev $INF_MACADDR set_apptlv \
+                    app=`printf "%d" $ROCE_CNP_PRI`,5,`printf "%d" $ROCE_CNP_DSCP`
+		sleep 1
+	fi
+	sleep 1
+	niccli -dev $INF_MACADDR getqos
+}
+
+if [ $QOS_TOOL -eq 1 ]
 then
     SYSTEMCTL_STATUS=`command -v systemctl`
     if [ "$SYSTEMCTL_STATUS" == "" ];
@@ -441,6 +554,32 @@ then
     then
 	bnxt_qos_pgm_pfc_ets $INF_NAME2
     fi
+
+elif [ $QOS_TOOL -eq 3 ]
+then
+    SYSTEMCTL_STATUS=`command -v systemctl`
+    if [ "$SYSTEMCTL_STATUS" == "" ];
+    then
+        echo "systemctl not found, install and re-run the script. exiting..."
+        exit -1
+    fi
+
+    STATUS="$(systemctl is-active lldpad)"
+    if [ "${STATUS}" = "active" ]; then
+        #Stop lldpad
+        echo "Disabling lldpad service, and using bnxtqos tool for configuration"
+        systemctl stop lldpad.service
+    else
+        echo "check if lldpad service is running : no action needed"
+    fi
+
+	if [ "$INF_NAME2" == "" ];
+	then
+		niccli_pgm_pfc_ets $INF_MACADDR1
+	else
+		niccli_pgm_pfc_ets $INF_MACADDR2
+	fi
+
 else
     IS_RUNNING=`ps -aef | grep lldpad | head -1 | grep "/usr/sbin/lldpad"`
     if [ "$IS_RUNNING" != " " ]

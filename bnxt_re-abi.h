@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2022, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -31,8 +31,6 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
- *
  * Description: Uverbs ABI header file
  */
 
@@ -50,6 +48,7 @@ enum {
 	BNXT_RE_COMP_MASK_UCNTX_DBR_RECOVERY_ENABLED = 0x20,
 	BNXT_RE_COMP_MASK_UCNTX_HW_RETX_ENABLED = 0x40,
 	BNXT_RE_COMP_MASK_UCNTX_SMALL_RECV_WQE_DRV_SUP = 0x80,
+	BNXT_RE_COMP_MASK_UCNTX_MAX_RQ_WQES = 0x100,
 };
 
 enum {
@@ -76,6 +75,7 @@ struct bnxt_re_uctx_resp {
 	__u32 modes;
 	__aligned_u64 comp_mask;
 	__u8 db_push_mode;
+	__u32 max_rq_wqes;
 } __attribute__((packed));
 
 enum {
@@ -105,12 +105,17 @@ enum {
 };
 
 enum {
-	BNXT_RE_COMP_MASK_CQ_REQ_CAP_DBR_RECOVERY = 0x1
+	BNXT_RE_COMP_MASK_CQ_REQ_CAP_DBR_RECOVERY = 0x1,
+	BNXT_RE_COMP_MASK_CQ_REQ_CAP_DBR_PACING_NOTIFY = 0x2
 };
 
 #define BNXT_RE_IS_DBR_RECOV_CQ(_req)					\
 	(_req.comp_mask & BNXT_RE_COMP_MASK_CQ_REQ_HAS_CAP_MASK &&	\
 	 _req.cq_capability & BNXT_RE_COMP_MASK_CQ_REQ_CAP_DBR_RECOVERY)
+
+#define BNXT_RE_IS_DBR_PACING_NOTIFY_CQ(_req)				\
+	(_req.comp_mask & BNXT_RE_COMP_MASK_CQ_REQ_HAS_CAP_MASK &&	\
+	 _req.cq_capability & BNXT_RE_COMP_MASK_CQ_REQ_CAP_DBR_PACING_NOTIFY)
 
 struct bnxt_re_cq_req {
 	__u64 cq_va;
@@ -157,6 +162,7 @@ struct bnxt_re_srq_req {
 struct bnxt_re_srq_resp {
 	__u32 srqid;
 	__u64 hdbr_kaddr;
+	__u64 uctx_srq_page;
 } __attribute__((packed));
 
 /* Modify QP */

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,8 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
  *
  * Description: main (header)
  */
@@ -93,8 +91,8 @@
 #include "compat.h"
 
 #define ROCE_DRV_MODULE_NAME		"bnxt_re"
-#define ROCE_DRV_MODULE_VERSION "229.0.139.0"
-#define ROCE_DRV_MODULE_RELDATE "January 29, 2024"
+#define ROCE_DRV_MODULE_VERSION "230.0.132.0"
+#define ROCE_DRV_MODULE_RELDATE "April 20, 2024"
 
 #define BNXT_RE_REF_WAIT_COUNT		20
 #define BNXT_RE_ROCE_V1_ETH_TYPE	0x8915
@@ -184,6 +182,7 @@ struct bnxt_re_work {
 
 struct bnxt_re_bond_info {
 	struct bnxt_re_dev *rdev;
+	struct bnxt_re_dev *rdev_peer;
 	struct net_device *master;
 	struct net_device *slave1;
 	struct net_device *slave2;
@@ -367,6 +366,20 @@ struct bnxt_dbq_nq_list {
 	mutex_unlock(&(_uctx)->cq_lock);				\
 }
 
+#define BNXT_RE_SRQ_PAGE_LIST_ADD(_uctx, _srq)				\
+{									\
+	mutex_lock(&(_uctx)->srq_lock);					\
+	list_add_tail(&(_srq)->srq_list, &(_uctx)->srq_list);		\
+	mutex_unlock(&(_uctx)->srq_lock);				\
+}
+
+#define BNXT_RE_SRQ_PAGE_LIST_DEL(_uctx, _srq)				\
+{									\
+	mutex_lock(&(_uctx)->srq_lock);					\
+	list_del(&(_srq)->srq_list);					\
+	mutex_unlock(&(_uctx)->srq_lock);				\
+}
+
 #define BNXT_RE_NETDEV_EVENT(event, x)					\
 	do {								\
 		if ((event) == (x))					\
@@ -410,6 +423,7 @@ struct bnxt_re_dbq_stats {
 	u64 do_pacing_slab_4;
 	u64 do_pacing_slab_5;
 	u64 do_pacing_water_mark;
+	u64 do_pacing_retry;
 };
 
 struct bnxt_re_dbg_mad {
@@ -440,6 +454,27 @@ struct bnxt_re_dbr_sw_stats {
 struct bnxt_re_ppp_sw_stats {
 	u32 ppp_enabled_ctxs;
 	u32 ppp_enabled_qps;
+};
+
+#define BNXT_RE_UDCC_INPUT_ARG_LENGTH 40
+struct bnxt_re_udcc_cfg {
+	u8		enable;
+
+	u16		max_comp_cfg_xfer;
+	u16		max_comp_data_xfer;
+	u16		max_sessions;
+
+	u8		cfg_arg[BNXT_RE_UDCC_INPUT_ARG_LENGTH];
+	int		cfg_arg_len;
+	void		*cfg;
+	dma_addr_t	cfg_map;
+	u32		cfg_len;
+
+	u8		data_arg[BNXT_RE_UDCC_INPUT_ARG_LENGTH];
+	int		data_arg_len;
+	void		*data;
+	dma_addr_t	data_map;
+	u32		data_len;
 };
 
 struct bnxt_re_dev {
@@ -488,6 +523,7 @@ struct bnxt_re_dev {
 	struct bnxt_qplib_res		qplib_res;
 	struct bnxt_qplib_dpi		dpi_privileged;
 	struct bnxt_qplib_cc_param	cc_param;
+	struct bnxt_qplib_cq_coal_param cq_coalescing;
 	/* serialize update of CC param */
 	struct mutex			cc_lock;
 	/* serialize access to active qp list */
@@ -585,6 +621,9 @@ struct bnxt_re_dev {
 	struct workqueue_struct	*hdbr_wq;
 	struct list_head	hdbr_fpgs;
 	struct mutex		hdbr_fpg_lock; /* protect free page list */
+
+	/* UDCC */
+	struct bnxt_re_udcc_cfg udcc_cfg;
 };
 
 #define bnxt_re_dev_pcifn_id(rdev)	((rdev)->en_dev->pdev->devfn)
@@ -863,14 +902,13 @@ static inline bool is_bnxt_cnp_queue(struct bnxt_re_dev *rdev, u8 ser_prof, u8 p
 #define BNXT_RE_DBR_RECOV_USERLAND_TIMEOUT (20)  /*  20 ms */
 #define BNXT_RE_DBR_INT_TIME 5 /* ms */
 #define BNXT_RE_PACING_EN_INT_THRESHOLD 50 /* Entries in DB FIFO */
-#define BNXT_RE_PACING_ALGO_THRESHOLD 250 /* Entries in DB FIFO */
+#define BNXT_RE_PACING_ALGO_THRESHOLD(ctx) (_is_chip_p7(ctx) ? 750 : 250) /* Entries in DB FIFO */
 /* Percentage of DB FIFO depth */
 #define BNXT_RE_PACING_DBQ_THRESHOLD BNXT_RE_PACING_DBQ_HIGH_WATERMARK
 /*
  * Alarm threshold multiple, number of times pacing algo threshold.
- * For Thor2 is set to zero, to disable the auto tuning.
  */
-#define BNXT_RE_PACING_ALARM_TH_MULTIPLE(ctx) (_is_chip_p7(ctx) ? 0 : 2)
+#define BNXT_RE_PACING_ALARM_TH_MULTIPLE 2
 
 /*
  * Maximum Percentage of configurable DB FIFO depth.
@@ -917,7 +955,7 @@ static inline void bnxt_re_set_def_pacing_threshold(struct bnxt_re_dev *rdev)
 {
 	rdev->qplib_res.pacing_data->pacing_th = rdev->pacing_algo_th;
 	rdev->qplib_res.pacing_data->alarm_th =
-		rdev->pacing_algo_th * BNXT_RE_PACING_ALARM_TH_MULTIPLE(rdev->chip_ctx);
+		rdev->pacing_algo_th * BNXT_RE_PACING_ALARM_TH_MULTIPLE;
 }
 
 static inline void bnxt_re_set_def_do_pacing(struct bnxt_re_dev *rdev)

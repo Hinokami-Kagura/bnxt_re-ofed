@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,8 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
  *
  * Description: DebugFS specifics
  */
@@ -166,9 +164,6 @@ void bnxt_re_qp_info_add_qpinfo(struct bnxt_re_dev *rdev, struct bnxt_re_qp *qp)
 {
 	char qp_name[32];
 
-	if (IS_ERR_OR_NULL(rdev->pdev_qpinfo_dir))
-		return;
-
 	qp->qp_data = kzalloc(BNXT_RE_DEBUGFS_QP_INFO_MAX_SIZE, GFP_KERNEL);
 	if (!qp->qp_data)
 		return;
@@ -178,9 +173,6 @@ void bnxt_re_qp_info_add_qpinfo(struct bnxt_re_dev *rdev, struct bnxt_re_qp *qp)
 						      rdev->pdev_qpinfo_dir,
 						      qp,
 						      &bnxt_re_qp_info_ops);
-	if (IS_ERR_OR_NULL(qp->qp_info_pdev_dentry))
-		dev_dbg(rdev_to_dev(rdev), "Unable to create debugfs file for QP%d",
-			qp->qplib_qp.id);
 }
 
 void bnxt_re_qp_info_rem_qpinfo(struct bnxt_re_dev *rdev, struct bnxt_re_qp *qp)
@@ -199,9 +191,6 @@ static ssize_t bnxt_re_info_debugfs_clear(struct file *fil, const char __user *u
 	struct seq_file *m = fil->private_data;
 	struct bnxt_re_dev *rdev = m->private;
 	struct bnxt_re_res_cntrs *rsors;
-
-	if (!rdev)
-		return 0;
 
 	rsors = &rdev->stats.rsors;
 
@@ -274,8 +263,6 @@ static ssize_t bnxt_re_drv_stats_debugfs_clear(struct file *fil, const char __us
 	struct seq_file *m = fil->private_data;
 	struct bnxt_re_dev *rdev = m->private;
 
-	if (!rdev)
-		return 0;
 
 	rdev->dbg_stats->dbq.fifo_occup_slab_1 = 0;
 	rdev->dbg_stats->dbq.fifo_occup_slab_2 = 0;
@@ -288,6 +275,7 @@ static ssize_t bnxt_re_drv_stats_debugfs_clear(struct file *fil, const char __us
 	rdev->dbg_stats->dbq.do_pacing_slab_4 = 0;
 	rdev->dbg_stats->dbq.do_pacing_slab_5 = 0;
 	rdev->dbg_stats->dbq.do_pacing_water_mark = 0;
+	rdev->dbg_stats->dbq.do_pacing_retry = 0;
 
 	return size;
 }
@@ -609,11 +597,6 @@ static int bnxt_re_info_debugfs_show(struct seq_file *s, void *unused)
 	int rc = 0;
 
 	seq_printf(s, "bnxt_re debug info:\n");
-	if (!rdev)
-		return -ENODEV;
-
-	if (!mutex_trylock(&bnxt_re_mutex))
-		return restart_syscall();
 
 	if (!bnxt_re_is_rdev_valid(rdev)) {
 		rc = -ENODEV;
@@ -688,9 +671,6 @@ skip_query:
 		   atomic_read(&rdev->stats.rsors.max_pd_count));
 	seq_printf(s, "\tResize CQ count: %d\n",
 		   atomic_read(&rdev->stats.rsors.resize_count));
-	seq_printf(s, "\tHW retransmission: %d\n",
-		   BNXT_RE_HW_RETX(rdev->dev_attr->dev_cap_flags) ?
-		   1 : 0);
 	seq_printf(s, "\tRecoverable Errors: %lld\n",
 		   rstat ? rstat->tx_bcast_pkts : 0);
 	if (rdev->binfo)
@@ -707,7 +687,10 @@ skip_query:
 		seq_printf(s, "\tseq_err_naks_rcvd: %llu\n", e_errs->seq_err_naks_rcvd);
 		seq_printf(s, "\trnr_naks_rcvd: %llu\n", e_errs->rnr_naks_rcvd);
 		seq_printf(s, "\tmissing_resp: %llu\n", e_errs->missing_resp);
-		seq_printf(s, "\tdup_reqs: %llu\n", e_errs->dup_req);
+		if (_is_hw_resp_retx_supported(rdev->dev_attr->dev_cap_flags))
+			seq_printf(s, "\tdup_reqs: %llu\n", e_errs->dup_req);
+		else
+			seq_printf(s, "\tdup_reqs: %llu\n", errs->dup_req);
 	} else {
 		seq_printf(s, "\tto_retransmits: %llu\n", errs->to_retransmits);
 		seq_printf(s, "\tseq_err_naks_rcvd: %llu\n", errs->seq_err_naks_rcvd);
@@ -807,12 +790,8 @@ skip_query:
 				i, i + 1, rdev->rcfw.rcfw_lat_slab_sec[i]);
 	}
 
-	/* show wqe mode */
-	seq_printf(s, "\tsq wqe mode: %d\n", rdev->chip_ctx->modes.wqe_mode);
-
 	seq_printf(s, "\n");
 err:
-	mutex_unlock(&bnxt_re_mutex);
 	return rc;
 }
 
@@ -843,13 +822,8 @@ static int bnxt_re_perf_debugfs_show(struct seq_file *s, void *unused)
 				i, i + 1, rdev->rcfw.rcfw_lat_slab_msec[i]);
 	}
 
-	if (!mutex_trylock(&bnxt_re_mutex))
-		return restart_syscall();
-
-	if (!bnxt_re_is_rdev_valid(rdev)) {
-		mutex_unlock(&bnxt_re_mutex);
+	if (!bnxt_re_is_rdev_valid(rdev))
 		return -ENODEV;
-	}
 
 	for (i = 0; i < RCFW_MAX_STAT_INDEX; i++) {
 		if (rdev->rcfw.qp_create_stats[i] > 0) {
@@ -902,7 +876,6 @@ static int bnxt_re_perf_debugfs_show(struct seq_file *s, void *unused)
 		   qp_modify_err_total, qp_modify_err_total_msec);
 	seq_puts(s, "\n");
 
-	mutex_unlock(&bnxt_re_mutex);
 	return 0;
 }
 
@@ -913,8 +886,6 @@ static int bnxt_re_drv_stats_debugfs_show(struct seq_file *s, void *unused)
 
 	seq_puts(s, "bnxt_re debug stats:\n");
 
-	if (!mutex_trylock(&bnxt_re_mutex))
-		return restart_syscall();
 
 	seq_printf(s, "=====[ IBDEV %s ]=============================\n",
 		   rdev->ibdev.name);
@@ -941,14 +912,23 @@ static int bnxt_re_drv_stats_debugfs_show(struct seq_file *s, void *unused)
 			   rdev->dbg_stats->dbq.do_pacing_slab_5);
 		seq_printf(s, "\tdbq_do_pacing_water_mark: %llu\n",
 			   rdev->dbg_stats->dbq.do_pacing_water_mark);
+		seq_printf(s, "\tdbq_do_pacing_retry: %llu\n",
+			   rdev->dbg_stats->dbq.do_pacing_retry);
 		seq_printf(s, "\tmad_consumed: %llu\n",
 			   rdev->dbg_stats->mad.mad_consumed);
 		seq_printf(s, "\tmad_processed: %llu\n",
 			   rdev->dbg_stats->mad.mad_processed);
 	}
+	seq_printf(s, "\tReq retransmission: %s\n",
+		   BNXT_RE_HW_REQ_RETX(rdev->dev_attr->dev_cap_flags) ?
+		   "Hardware" : "Firmware");
+	seq_printf(s, "\tResp retransmission: %s\n",
+		   BNXT_RE_HW_RESP_RETX(rdev->dev_attr->dev_cap_flags) ?
+		   "Hardware" : "Firmware");
+	/* show wqe mode */
+	seq_printf(s, "\tsq wqe mode: %d\n", rdev->chip_ctx->modes.wqe_mode);
 	seq_puts(s, "\n");
 
-	mutex_unlock(&bnxt_re_mutex);
 	return rc;
 }
 
@@ -1007,13 +987,8 @@ static const struct file_operations bnxt_re_drv_stats_dbg_ops = {
 
 void bnxt_re_add_dbg_files(struct bnxt_re_dev *rdev)
 {
-	if (IS_ERR_OR_NULL(rdev->pdev_debug_dir))
-		return;
-
 	rdev->pdev_qpinfo_dir = debugfs_create_dir("qp_info",
 						   rdev->pdev_debug_dir);
-	if (IS_ERR_OR_NULL(rdev->pdev_qpinfo_dir))
-		dev_dbg(rdev_to_dev(rdev), "Unable to create debugfs info for qp_info");
 }
 
 static ssize_t bnxt_re_hdbr_dfs_read(struct file *filp, char __user *buffer,
@@ -1059,7 +1034,7 @@ void bnxt_re_add_hdbr_knobs(struct bnxt_re_dev *rdev)
 	if (!rdev->hdbr_enabled)
 		return;
 
-	if (data || IS_ERR_OR_NULL(rdev->pdev_debug_dir))
+	if (data)
 		return;
 
 	data = kzalloc(sizeof(*data), GFP_KERNEL);
@@ -1107,9 +1082,6 @@ void bnxt_re_rename_debugfs_entry(struct bnxt_re_dev *rdev)
 {
 	struct dentry *port_debug_dir;
 
-	if (IS_ERR_OR_NULL(bnxt_re_debugfs_root))
-		return;
-
 	if (!test_bit(BNXT_RE_FLAG_PER_PORT_DEBUG_INFO, &rdev->flags)) {
 		strncpy(rdev->dev_name, dev_name(&rdev->ibdev.dev), IB_DEVICE_NAME_MAX);
 		bnxt_re_debugfs_add_port(rdev, rdev->dev_name);
@@ -1139,9 +1111,6 @@ void bnxt_re_debugfs_add_pdev(struct bnxt_re_dev *rdev)
 {
 	const char *pdev_name;
 
-	if (IS_ERR_OR_NULL(bnxt_re_debugfs_root))
-		return;
-
 	pdev_name = pci_name(rdev->en_dev->pdev);
 	rdev->pdev_debug_dir = debugfs_create_dir(pdev_name,
 						  bnxt_re_debugfs_root);
@@ -1164,46 +1133,20 @@ void bnxt_re_debugfs_rem_pdev(struct bnxt_re_dev *rdev)
 
 void bnxt_re_debugfs_add_port(struct bnxt_re_dev *rdev, char *dev_name)
 {
-	if (IS_ERR_OR_NULL(bnxt_re_debugfs_root))
+	if (!rdev->en_dev)
 		return;
 
-	if (rdev->en_dev) {
-		rdev->port_debug_dir = debugfs_create_dir(dev_name,
-							  bnxt_re_debugfs_root);
-		if (IS_ERR_OR_NULL(rdev->port_debug_dir)) {
-			dev_dbg(rdev_to_dev(rdev),
-				"Unable to create debugfs %s",
-				dev_name);
-			return;
-		}
-
-		rdev->info = debugfs_create_file("info", 00400,
-						 rdev->port_debug_dir, rdev,
-						 &bnxt_re_info_dbg_ops);
-		if (IS_ERR_OR_NULL(rdev->info)) {
-			dev_dbg(rdev_to_dev(rdev),
-				"Unable to create debugfs info");
-			return;
-		}
-
-		rdev->sp_perf_stats = debugfs_create_file("sp_perf_stats", 0644,
-						 rdev->port_debug_dir, rdev,
-						 &bnxt_re_perf_dbg_ops);
-		if (IS_ERR_OR_NULL(rdev->sp_perf_stats)) {
-			dev_dbg(rdev_to_dev(rdev),
-				"Unable to create debugfs info");
-			return;
-		}
-
-		rdev->drv_dbg_stats = debugfs_create_file("drv_dbg_stats", 0644,
-							  rdev->port_debug_dir, rdev,
-							  &bnxt_re_drv_stats_dbg_ops);
-		if (IS_ERR_OR_NULL(rdev->drv_dbg_stats)) {
-			dev_dbg(rdev_to_dev(rdev),
-				"Unable to create debugfs driver stats");
-			return;
-		}
-	}
+	rdev->port_debug_dir = debugfs_create_dir(dev_name,
+						  bnxt_re_debugfs_root);
+	rdev->info = debugfs_create_file("info", 0400,
+					 rdev->port_debug_dir, rdev,
+					 &bnxt_re_info_dbg_ops);
+	rdev->sp_perf_stats = debugfs_create_file("sp_perf_stats", 0644,
+						  rdev->port_debug_dir, rdev,
+						  &bnxt_re_perf_dbg_ops);
+	rdev->drv_dbg_stats = debugfs_create_file("drv_dbg_stats", 0644,
+						  rdev->port_debug_dir, rdev,
+						  &bnxt_re_drv_stats_dbg_ops);
 }
 
 void bnxt_re_rem_dbg_files(struct bnxt_re_dev *rdev)

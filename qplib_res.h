@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,8 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
  *
  * Description: QPLib resource manager (header)
  */
@@ -90,10 +88,9 @@ struct bnxt_qplib_drv_modes {
 	u8	dbr_pacing_ext;
 	u8	dbr_drop_recov;
 	u8	dbr_primary_pf;
-	u8	dbr_pacing_v0;
+	u8	dbr_pacing_chip_p7;
 	u8	hdbr_enabled;
-	u8	steering_tag_supported;
-	u8	express_mode_supported;
+	u8	udcc_supported;
 };
 
 struct bnxt_qplib_chip_ctx {
@@ -159,6 +156,11 @@ static inline u8 bnxt_qplib_dbr_pacing_ext_en(struct bnxt_qplib_chip_ctx *cctx)
 	return cctx->modes.dbr_pacing_ext;
 }
 
+static inline u8 bnxt_qplib_dbr_pacing_chip_p7_en(struct bnxt_qplib_chip_ctx *cctx)
+{
+	return cctx->modes.dbr_pacing_chip_p7;
+}
+
 static inline u8 bnxt_qplib_dbr_pacing_is_primary_pf(struct bnxt_qplib_chip_ctx *cctx)
 {
 	return cctx->modes.dbr_primary_pf;
@@ -170,10 +172,13 @@ static inline void bnxt_qplib_dbr_pacing_set_primary_pf
 	cctx->modes.dbr_primary_pf = val;
 }
 
+static inline u8 bnxt_qplib_udcc_supported(struct bnxt_qplib_chip_ctx *cctx)
+{
+	return cctx->modes.udcc_supported;
+}
+
 /* Defines for handling the HWRM version check */
 #define HWRM_VERSION_DEV_ATTR_MAX_DPI	0x1000A0000000D
-#define HWRM_VERSION_ROCE_STATS_FN_ID	0x1000A00000045
-#define HWRM_VERSION_ROCE_QP_EXT_STATS_CTX_ID_VALID 0x1000A00020098
 
 #define PTR_CNT_PER_PG		(PAGE_SIZE / sizeof(void *))
 #define PTR_MAX_IDX_PER_PG	(PTR_CNT_PER_PG - 1)
@@ -193,9 +198,9 @@ enum bnxt_qplib_hwq_type {
 };
 
 #define MAX_PBL_LVL_0_PGS		1
-#define MAX_PBL_LVL_1_PGS		512
-#define MAX_PBL_LVL_1_PGS_SHIFT		9
-#define MAX_PDL_LVL_SHIFT		9
+#define MAX_PBL_LVL_1_PGS		(PAGE_SIZE / sizeof(u64))
+#define MAX_PBL_LVL_1_PGS_SHIFT		ilog2(MAX_PBL_LVL_1_PGS)
+#define MAX_PDL_LVL_SHIFT		ilog2(MAX_PBL_LVL_1_PGS)
 
 enum bnxt_qplib_pbl_lvl {
 	PBL_LVL_0,
@@ -613,11 +618,20 @@ static inline int bnxt_ext_stats_supported(struct bnxt_qplib_chip_ctx *ctx,
 		((virtfn && _is_chip_p7(ctx)) || (!virtfn)));
 }
 
+static inline bool _is_hw_req_retx_supported(u16 dev_cap_flags)
+{
+	return dev_cap_flags & CREQ_QUERY_FUNC_RESP_SB_HW_REQUESTER_RETX_ENABLED;
+}
+
+static inline bool _is_hw_resp_retx_supported(u16 dev_cap_flags)
+{
+	return dev_cap_flags & CREQ_QUERY_FUNC_RESP_SB_HW_RESPONDER_RETX_ENABLED;
+}
+
 static inline bool _is_hw_retx_supported(u16 dev_cap_flags)
 {
-	return dev_cap_flags &
-		(CREQ_QUERY_FUNC_RESP_SB_HW_REQUESTER_RETX_ENABLED |
-		 CREQ_QUERY_FUNC_RESP_SB_HW_RESPONDER_RETX_ENABLED);
+	return _is_hw_req_retx_supported(dev_cap_flags) ||
+		_is_hw_resp_retx_supported(dev_cap_flags);
 }
 
 static inline bool _is_drv_ver_reg_supported(u8 dev_cap_ext_flags)
@@ -632,27 +646,33 @@ static inline bool _is_small_recv_wqe_supported(u8 dev_cap_ext_flags)
 		CREQ_QUERY_FUNC_RESP_SB_CREATE_SRQ_SGE_SUPPORTED;
 }
 
+static inline bool _is_cq_coalescing_supported(u16 dev_cap_ext_flags2)
+{
+	return dev_cap_ext_flags2 &
+		CREQ_QUERY_FUNC_RESP_SB_CQ_COALESCING_SUPPORTED;
+}
+
+static inline bool _is_optimize_modify_qp_supported(u16 dev_cap_ext_flags2)
+{
+	return dev_cap_ext_flags2 & CREQ_QUERY_FUNC_RESP_SB_OPTIMIZE_MODIFY_QP_SUPPORTED;
+}
+
+#ifdef HAVE_IB_ACCESS_RELAXED_ORDERING
+static inline bool _is_relaxed_ordering_supported(u16 dev_cap_ext_flags2)
+{
+	return dev_cap_ext_flags2 & CREQ_QUERY_FUNC_RESP_SB_MEMORY_REGION_RO_SUPPORTED;
+}
+#endif
+
 #define BNXT_RE_INIT_FW_DRV_VER_SUPPORT_CMD_SIZE 16
 
 #define BNXT_RE_CREATE_QP_EXT_STAT_CONTEXT_SIZE 8
 #define BNXT_RE_MODIFY_QP_EXT_STAT_CONTEXT_SIZE 8
 
-#define BNXT_RE_EXP_MODE_ENABLED_CMD_SIZE_CREATE_QP		4
-#define BNXT_RE_STEERING_TAG_SUPPORTED_CMD_SIZE_CREATE_QP	4
-#define BNXT_RE_STEERING_TAG_SUPPORTED_CMD_SIZE_MODIFY_QP	8
-#define BNXT_RE_STEERING_TAG_SUPPORTED_CMD_SIZE			16
-static inline bool _is_steering_tag_supported(struct bnxt_qplib_res *res)
-{
-	return res->cctx->modes.steering_tag_supported;
-}
-
-static inline bool _is_qp_exp_mode_supported(struct bnxt_qplib_res *res)
-{
-	return res->cctx->modes.express_mode_supported;
-}
-
 /* Disable HW_RETX */
 #define BNXT_RE_HW_RETX(a) _is_hw_retx_supported((a))
+#define BNXT_RE_HW_REQ_RETX(a) _is_hw_req_retx_supported((a))
+#define BNXT_RE_HW_RESP_RETX(a) _is_hw_resp_retx_supported((a))
 
 static inline bool _is_cqe_v2_supported(u16 dev_cap_flags)
 {
@@ -980,5 +1000,12 @@ static inline void bnxt_qplib_max_res_supported(struct bnxt_qplib_chip_ctx *cctx
 		max_res->max_pd = BNXT_QPLIB_GENP4_PF_MAX_PD;
 		break;
 	}
+}
+
+static inline u32 bnxt_re_cap_fw_res(u32 fw_val, u32 drv_cap, bool sw_max_en)
+{
+	if (sw_max_en)
+		return fw_val;
+	return min_t(u32, fw_val, drv_cap);
 }
 #endif

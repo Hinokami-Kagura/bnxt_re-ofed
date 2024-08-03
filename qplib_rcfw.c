@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,8 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
  *
  * Description: RDMA Controller HW interface
  */
@@ -589,15 +587,7 @@ int __bnxt_qplib_rcfw_send_message(struct bnxt_qplib_rcfw *rcfw,
 		/* failed with status */
 		dev_err(&rcfw->pdev->dev, "QPLIB: cmdq[%#x]=%#x status %d",
 			cookie, opcode, event->status);
-		rc = -EFAULT;
-		/*
-		 * Workaround to avoid errors in the stack during bond
-		 * creation and deletion.
-		 * Disable error returned for  ADD_GID/DEL_GID
-		 */
-		if (opcode == CMDQ_BASE_OPCODE_ADD_GID ||
-		    opcode == CMDQ_BASE_OPCODE_DELETE_GID)
-			rc = 0;
+		rc = -EIO;
 	}
 
 	return rc;
@@ -987,19 +977,13 @@ int bnxt_qplib_init_rcfw(struct bnxt_qplib_rcfw *rcfw, int is_virtfn)
 	struct bnxt_qplib_ctx *hctx;
 	struct bnxt_qplib_res *res;
 	struct bnxt_qplib_hwq *hwq;
-	u8 cmd_size;
 	int rc;
 
 	res = rcfw->res;
 	cctx = res->cctx;
 	hctx = res->hctx;
-
-	cmd_size = sizeof(req);
-	if (!_is_drv_ver_reg_supported(res->dattr->dev_cap_ext_flags))
-		cmd_size -= BNXT_RE_INIT_FW_DRV_VER_SUPPORT_CMD_SIZE;
-
 	bnxt_qplib_rcfw_cmd_prep(&req, CMDQ_BASE_OPCODE_INITIALIZE_FW,
-				 cmd_size);
+				 sizeof(req));
 	/* Supply (log-base-2-of-host-page-size - base-page-shift)
 	 * to bono to adjust the doorbell page sizes.
 	 */
@@ -1072,9 +1056,13 @@ skip_ctx_setup:
 
 	if (res->en_dev->flags & BNXT_EN_FLAG_ROCE_VF_RES_MGMT)
 		req.flags |= CMDQ_INITIALIZE_FW_FLAGS_L2_VF_RESOURCE_MGMT;
+
+	if (_is_optimize_modify_qp_supported(res->dattr->dev_cap_ext_flags2))
+		req.flags |= CMDQ_INITIALIZE_FW_FLAGS_OPTIMIZE_MODIFY_QP_SUPPORTED;
+
 	req.stat_ctx_id = cpu_to_le32(hctx->stats.fw_id);
 	bnxt_qplib_fill_cmdqmsg(&msg, &req, &resp, NULL,
-				cmd_size, sizeof(resp), 0);
+				sizeof(req), sizeof(resp), 0);
 	rc = bnxt_qplib_rcfw_send_message(rcfw, &msg);
 	if (rc)
 		return rc;
@@ -1211,6 +1199,8 @@ void bnxt_qplib_rcfw_stop_irq(struct bnxt_qplib_rcfw *rcfw, bool kill)
 	}
 	atomic_set(&rcfw->rcfw_intr_enabled, 0);
 	rcfw->num_irq_stopped++;
+	dev_dbg(&rcfw->pdev->dev, "%s: kill_tasklet %d from %ps", __func__,
+		kill, __builtin_return_address(0));
 	/* Cleanup Tasklet */
 	if (kill)
 		tasklet_kill(&creq->creq_tasklet);

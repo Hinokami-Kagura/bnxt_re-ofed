@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2023-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -121,8 +121,8 @@ enum bnxt_re_hw_stats {
 	BNXT_RE_RX_SEND_REQ,
 	BNXT_RE_RX_ROCE_PKTS,
 	BNXT_RE_RX_ROCE_BYTES,
-	BNXT_RE_RX_ROCE_GOOD_PKTS,
-	BNXT_RE_RX_ROCE_GOOD_BYTES,
+	BNXT_RE_RX_GOOD_PKTS,
+	BNXT_RE_RX_GOOD_BYTES,
 	BNXT_RE_OOB,
 	BNXT_RE_TX_CNP,
 	BNXT_RE_RX_CNP,

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,8 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
  *
  * Description: QPLib resource manager
  */
@@ -398,7 +396,7 @@ int bnxt_qplib_alloc_init_hwq(struct bnxt_qplib_hwq *hwq,
 					"QPLIB: dst_virt_ptr[%d] = 0x%llx", i,
 					dst_virt_ptr[PTR_PG(i)][PTR_IDX(i)]);
 #endif
-		} else { /* pages < 512 npbl = 1, npde = 0 */
+		} else { /* pages < MAX_PBL_LVL_1_PGS npbl = 1, npde = 0 */
 			u32 flag = (hwq_attr->type == HWQ_TYPE_L2_CMPL) ?
 				    0 : PTU_PTE_VALID;
 
@@ -903,7 +901,7 @@ int bnxt_qplib_alloc_dpi(struct bnxt_qplib_res	*res,
 
 	if (type == BNXT_QPLIB_DPI_TYPE_KERNEL) {
 		/*
-		 * Priviledged dbr was already mapped at bar base off
+		 * Privileged dbr was already mapped at bar base off
 		 * ucreg.offset. It is sharing the same normal DB page
 		 * with L2 driver. Here we only need to initialize it.
 		 */
@@ -1020,7 +1018,7 @@ static int bnxt_qplib_alloc_dpi_tbl(struct bnxt_qplib_res *res,
 	reg = &dpit->wcreg;
 
 	if (!_is_chip_gen_p5_p7(res->cctx)) {
-		/* Offest should come from L2 driver */
+		/* Offset should come from L2 driver */
 		dbr_offset = dev_attr->l2_db_size;
 		dpit->ucreg.offset = dbr_offset;
 		dpit->wcreg.offset = dbr_offset;

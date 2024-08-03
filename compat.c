@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -31,7 +31,6 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- *
  * Description: Compat file for supporting multiple distros
  */
 
@@ -57,7 +56,6 @@
 #ifndef RHEL_RELEASE_VERSION
 #define RHEL_RELEASE_VERSION(a, b)       (((a) << 8) + (b))
 #endif
-
 
 int bnxt_re_register_netdevice_notifier(struct notifier_block *nb)
 {
@@ -317,15 +315,11 @@ int bnxt_re_get_port_map(struct netdev_bonding_info *netdev_binfo,
 				BNXT_RE_ACTIVE_MAP_PORT1 :
 				BNXT_RE_ACTIVE_MAP_PORT2;
 		}
-		binfo->aggr_mode =
-			CMDQ_SET_LINK_AGGR_MODE_AGGR_MODE_ACTIVE_BACKUP;
 	} else { /* Active - Active */
 		binfo->active_port_map = bnxt_re_get_bond_link_status(binfo);
 		dev_info(rdev_to_dev(binfo->rdev),
 			 "LAG mode = active-active binfo->active_port_map = 0x%x\n",
 			 binfo->active_port_map);
-		binfo->aggr_mode =
-			CMDQ_SET_LINK_AGGR_MODE_AGGR_MODE_ACTIVE_ACTIVE;
 	}
 	dev_dbg(rdev_to_dev(binfo->rdev),
 		"binfo->aggr_mode = 0x%x binfo->active_port_map = 0x%x\n",
@@ -412,17 +406,6 @@ void bnxt_re_set_dma_device(struct ib_device *ibdev, struct bnxt_re_dev *rdev)
 	ibdev->dma_device = &rdev->en_dev->pdev->dev;
 #else
 	ibdev->dev.parent = &rdev->en_dev->pdev->dev;
-#endif
-}
-
-void bnxt_re_set_max_gid(u16 *max_sgid)
-{
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0) || \
-	(defined(RHEL_RELEASE_CODE) && ((RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8, 2))))
-	*max_sgid = max_t(u32, 256, *max_sgid);
-	*max_sgid = min_t(u32, 256, *max_sgid);
-#else
-	*max_sgid = min_t(u32, 256, *max_sgid);
 #endif
 }
 
