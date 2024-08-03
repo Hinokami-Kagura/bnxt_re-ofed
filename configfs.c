@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,7 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
  *
  * Description: Enables configfs interface
  */
@@ -63,7 +62,7 @@ static struct bnxt_re_dev *__get_rdev_from_name(const char *name)
 	return found ? rdev : ERR_PTR(-ENODEV);
 }
 
-static struct bnxt_re_dev * bnxt_re_get_valid_rdev(struct bnxt_re_cc_group *ccgrp)
+static struct bnxt_re_dev *bnxt_re_get_valid_rdev(struct bnxt_re_cfg_group *ccgrp)
 {
 	struct bnxt_re_dev *rdev = NULL;
 
@@ -135,7 +134,7 @@ static int __bnxt_re_clear_dscp(struct bnxt_re_dev *rdev, u16 portid)
 	int rc = 0;
 	u16 i;
 
-	/* Get older values to be reseted. Set mask to 0 */
+	/* Get older values to be reset. Set mask to 0 */
 	rc = bnxt_re_query_hwrm_dscp2pri(rdev, d2p, &count, portid);
 	if (rc) {
 		dev_err(rdev_to_dev(rdev),
@@ -237,13 +236,13 @@ bail:
 	return rc;
 }
 
-static struct bnxt_re_cc_group * __get_cc_group(struct config_item *item)
+static struct bnxt_re_cfg_group *__get_cc_group(struct config_item *item)
 {
 	struct config_group *group = container_of(item, struct config_group,
 						  cg_item);
-	struct bnxt_re_cc_group *ccgrp =
-			container_of(group, struct bnxt_re_cc_group, group);
-        return ccgrp;
+	struct bnxt_re_cfg_group *ccgrp =
+			container_of(group, struct bnxt_re_cfg_group, group);
+	return ccgrp;
 }
 
 static bool _is_cc_gen1_plus(struct bnxt_re_dev *rdev)
@@ -540,9 +539,9 @@ static int __print_pri_dscp_values(struct bnxt_re_dev *rdev,
 	return bytes;
 }
 
-int bnxt_re_get_print_dscp_pri(struct bnxt_re_dev *rdev, char *buf,
-			       struct bnxt_qplib_cc_param *ccparam,
-			       bool slave)
+static int bnxt_re_get_print_dscp_pri(struct bnxt_re_dev *rdev, char *buf,
+				      struct bnxt_qplib_cc_param *ccparam,
+				      bool slave)
 {
 	struct bnxt_re_tc_rec *tc_rec;
 	int rc = 0, bytes = 0;
@@ -571,7 +570,7 @@ end:
 
 static ssize_t apply_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_qplib_cc_param ccparam = {0};
 	struct bnxt_qplib_drv_modes *drv_mode;
 	struct bnxt_re_dev *rdev;
@@ -695,7 +694,7 @@ exit:
 static ssize_t apply_store(struct config_item *item, const char *buf,
 			   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 	u8 prio_map;
@@ -757,7 +756,7 @@ CONFIGFS_ATTR(, apply);
 
 static ssize_t advanced_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_qplib_drv_modes *drv_mode;
 	struct bnxt_re_dev *rdev;
 
@@ -777,7 +776,7 @@ static ssize_t advanced_show(struct config_item *item, char *buf)
 static ssize_t advanced_store(struct config_item *item, const char *buf,
 				   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_qplib_drv_modes *drv_mode;
 	struct bnxt_re_dev *rdev;
 	int val;
@@ -800,7 +799,7 @@ CONFIGFS_ATTR(, advanced);
 
 static ssize_t cnp_dscp_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -815,7 +814,7 @@ static ssize_t cnp_dscp_show(struct config_item *item, char *buf)
 static ssize_t cnp_dscp_store(struct config_item *item, const char *buf,
 				   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_tc_rec *tc_rec;
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
@@ -862,7 +861,7 @@ CONFIGFS_ATTR(, cnp_dscp);
 
 static ssize_t cnp_prio_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -877,7 +876,7 @@ static ssize_t cnp_prio_show(struct config_item *item, char *buf)
 static ssize_t cnp_prio_store(struct config_item *item, const char *buf,
 			      size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -904,7 +903,7 @@ CONFIGFS_ATTR(, cnp_prio);
 
 static ssize_t cc_mode_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -919,7 +918,7 @@ static ssize_t cc_mode_show(struct config_item *item, char *buf)
 static ssize_t cc_mode_store(struct config_item *item, const char *buf,
 			     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -941,7 +940,7 @@ CONFIGFS_ATTR(, cc_mode);
 
 static ssize_t dcn_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_qplib_cc_param_ext2 *cc_ext2;
 	struct bnxt_re_dev *rdev;
 	ssize_t cnt = 0;
@@ -976,7 +975,7 @@ static ssize_t dcn_show(struct config_item *item, char *buf)
 static ssize_t dcn_store(struct config_item *item, const char *buf,
 			 size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	int idx, ql_thr, cr, tr, cnp_inc, upd_imm;
 	struct bnxt_qplib_cc_param_ext2 *cc_ext2;
 	struct bnxt_re_dev *rdev;
@@ -1033,7 +1032,7 @@ CONFIGFS_ATTR(, dcn);
 
 static ssize_t ecn_enable_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1048,7 +1047,7 @@ static ssize_t ecn_enable_show(struct config_item *item, char *buf)
 static ssize_t ecn_enable_store(struct config_item *item, const char *buf,
 			    size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1069,7 +1068,7 @@ CONFIGFS_ATTR(, ecn_enable);
 
 static ssize_t g_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	if (!ccgrp)
 		return -EINVAL;
@@ -1083,7 +1082,7 @@ static ssize_t g_show(struct config_item *item, char *buf)
 static ssize_t g_store(struct config_item *item, const char *buf,
 		       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1103,7 +1102,7 @@ CONFIGFS_ATTR(, g);
 
 static ssize_t init_cr_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1118,7 +1117,7 @@ static ssize_t init_cr_show(struct config_item *item, char *buf)
 static ssize_t init_cr_store(struct config_item *item, const char *buf,
 			     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1138,7 +1137,7 @@ CONFIGFS_ATTR(, init_cr);
 
 static ssize_t inact_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	if (!ccgrp)
 		return -EINVAL;
@@ -1152,7 +1151,7 @@ static ssize_t inact_th_show(struct config_item *item, char *buf)
 static ssize_t inact_th_store(struct config_item *item, const char *buf,
 			      size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1172,7 +1171,7 @@ CONFIGFS_ATTR(, inact_th);
 
 static ssize_t init_tr_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1187,7 +1186,7 @@ static ssize_t init_tr_show(struct config_item *item, char *buf)
 static ssize_t init_tr_store(struct config_item *item, const char *buf,
 			     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1207,7 +1206,7 @@ CONFIGFS_ATTR(, init_tr);
 
 static ssize_t nph_per_state_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1222,7 +1221,7 @@ static ssize_t nph_per_state_show(struct config_item *item, char *buf)
 static ssize_t nph_per_state_store(struct config_item *item, const char *buf,
 			   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1243,7 +1242,7 @@ CONFIGFS_ATTR(, nph_per_state);
 
 static ssize_t time_pph_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1258,7 +1257,7 @@ static ssize_t time_pph_show(struct config_item *item, char *buf)
 static ssize_t time_pph_store(struct config_item *item, const char *buf,
 			      size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1281,7 +1280,7 @@ CONFIGFS_ATTR(, time_pph);
 
 static ssize_t pkts_pph_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1296,7 +1295,7 @@ static ssize_t pkts_pph_show(struct config_item *item, char *buf)
 static ssize_t pkts_pph_store(struct config_item *item, const char *buf,
 			      size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1319,7 +1318,7 @@ CONFIGFS_ATTR(, pkts_pph);
 
 static ssize_t rtt_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1334,7 +1333,7 @@ static ssize_t rtt_show(struct config_item *item, char *buf)
 static ssize_t rtt_store(struct config_item *item, const char *buf,
 			 size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1354,7 +1353,7 @@ CONFIGFS_ATTR(, rtt);
 
 static ssize_t tcp_cp_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1369,7 +1368,7 @@ static ssize_t tcp_cp_show(struct config_item *item, char *buf)
 static ssize_t tcp_cp_store(struct config_item *item, const char *buf,
 			    size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1389,7 +1388,7 @@ CONFIGFS_ATTR(, tcp_cp);
 
 static ssize_t roce_dscp_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1404,7 +1403,7 @@ static ssize_t roce_dscp_show(struct config_item *item, char *buf)
 static ssize_t roce_dscp_store(struct config_item *item, const char *buf,
 			      size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_tc_rec *tc_rec;
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
@@ -1451,7 +1450,7 @@ CONFIGFS_ATTR(, roce_dscp);
 
 static ssize_t roce_prio_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1467,7 +1466,7 @@ static ssize_t roce_prio_show(struct config_item *item, char *buf)
 static ssize_t roce_prio_store(struct config_item *item, const char *buf,
 			       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1492,7 +1491,7 @@ CONFIGFS_ATTR(, roce_prio);
 
 static ssize_t ecn_marking_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1507,7 +1506,7 @@ static ssize_t ecn_marking_show(struct config_item *item, char *buf)
 static ssize_t ecn_marking_store(struct config_item *item, const char *buf,
 			     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1529,7 +1528,7 @@ CONFIGFS_ATTR(, ecn_marking);
 
 static ssize_t disable_prio_vlan_tx_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1544,7 +1543,7 @@ static ssize_t disable_prio_vlan_tx_show(struct config_item *item, char *buf)
 static ssize_t disable_prio_vlan_tx_store(struct config_item *item, const char *buf,
 				     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1563,7 +1562,7 @@ CONFIGFS_ATTR(, disable_prio_vlan_tx);
 
 static ssize_t inact_th_hi_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1578,7 +1577,7 @@ static ssize_t inact_th_hi_show(struct config_item *item, char *buf)
 static ssize_t inact_th_hi_store(struct config_item *item, const char *buf,
 				 size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1597,7 +1596,7 @@ CONFIGFS_ATTR(, inact_th_hi);
 
 static ssize_t min_time_bet_cnp_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1612,7 +1611,7 @@ static ssize_t min_time_bet_cnp_show(struct config_item *item, char *buf)
 static ssize_t min_time_bet_cnp_store(struct config_item *item,
 				      const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1631,7 +1630,7 @@ CONFIGFS_ATTR(, min_time_bet_cnp);
 
 static ssize_t init_cp_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1646,7 +1645,7 @@ static ssize_t init_cp_show(struct config_item *item, char *buf)
 static ssize_t init_cp_store(struct config_item *item,
 			     const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1665,7 +1664,7 @@ CONFIGFS_ATTR(, init_cp);
 
 static ssize_t tr_update_mode_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1680,7 +1679,7 @@ static ssize_t tr_update_mode_show(struct config_item *item, char *buf)
 static ssize_t tr_update_mode_store(struct config_item *item,
 				    const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1699,7 +1698,7 @@ CONFIGFS_ATTR(, tr_update_mode);
 
 static ssize_t tr_update_cyls_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1714,7 +1713,7 @@ static ssize_t tr_update_cyls_show(struct config_item *item, char *buf)
 static ssize_t tr_update_cyls_store(struct config_item *item,
 				    const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1733,7 +1732,7 @@ CONFIGFS_ATTR(, tr_update_cyls);
 
 static ssize_t fr_num_rtts_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1748,7 +1747,7 @@ static ssize_t fr_num_rtts_show(struct config_item *item, char *buf)
 static ssize_t fr_num_rtts_store(struct config_item *item, const char *buf,
 				 size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1767,7 +1766,7 @@ CONFIGFS_ATTR(, fr_num_rtts);
 
 static ssize_t ai_rate_incr_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1782,7 +1781,7 @@ static ssize_t ai_rate_incr_show(struct config_item *item, char *buf)
 static ssize_t ai_rate_incr_store(struct config_item *item, const char *buf,
 				  size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1801,7 +1800,7 @@ CONFIGFS_ATTR(, ai_rate_incr);
 
 static ssize_t red_rel_rtts_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1816,7 +1815,7 @@ static ssize_t red_rel_rtts_th_show(struct config_item *item, char *buf)
 static ssize_t red_rel_rtts_th_store(struct config_item *item,
 				     const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1835,7 +1834,7 @@ CONFIGFS_ATTR(, red_rel_rtts_th);
 
 static ssize_t act_rel_cr_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1850,7 +1849,7 @@ static ssize_t act_rel_cr_th_show(struct config_item *item, char *buf)
 static ssize_t act_rel_cr_th_store(struct config_item *item, const char *buf,
 				   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1869,7 +1868,7 @@ CONFIGFS_ATTR(, act_rel_cr_th);
 
 static ssize_t cr_min_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1884,7 +1883,7 @@ static ssize_t cr_min_th_show(struct config_item *item, char *buf)
 static ssize_t cr_min_th_store(struct config_item *item, const char *buf,
 			       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1903,7 +1902,7 @@ CONFIGFS_ATTR(, cr_min_th);
 
 static ssize_t bw_avg_weight_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1918,7 +1917,7 @@ static ssize_t bw_avg_weight_show(struct config_item *item, char *buf)
 static ssize_t bw_avg_weight_store(struct config_item *item, const char *buf,
 				   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1937,7 +1936,7 @@ CONFIGFS_ATTR(, bw_avg_weight);
 
 static ssize_t act_cr_factor_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1952,7 +1951,7 @@ static ssize_t act_cr_factor_show(struct config_item *item, char *buf)
 static ssize_t act_cr_factor_store(struct config_item *item, const char *buf,
 				   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -1971,7 +1970,7 @@ CONFIGFS_ATTR(, act_cr_factor);
 
 static ssize_t max_cp_cr_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -1986,7 +1985,7 @@ static ssize_t max_cp_cr_th_show(struct config_item *item, char *buf)
 static ssize_t max_cp_cr_th_store(struct config_item *item, const char *buf,
 				  size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2005,7 +2004,7 @@ CONFIGFS_ATTR(, max_cp_cr_th);
 
 static ssize_t cp_bias_en_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2020,7 +2019,7 @@ static ssize_t cp_bias_en_show(struct config_item *item, char *buf)
 static ssize_t cp_bias_en_store(struct config_item *item, const char *buf,
 				size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2039,7 +2038,7 @@ CONFIGFS_ATTR(, cp_bias_en);
 
 static ssize_t cp_bias_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2054,7 +2053,7 @@ static ssize_t cp_bias_show(struct config_item *item, char *buf)
 static ssize_t cp_bias_store(struct config_item *item, const char *buf,
 			     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2073,7 +2072,7 @@ CONFIGFS_ATTR(, cp_bias);
 
 static ssize_t cnp_ecn_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2088,7 +2087,7 @@ static ssize_t cnp_ecn_show(struct config_item *item, char *buf)
 static ssize_t cnp_ecn_store(struct config_item *item, const char *buf,
 			     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2107,7 +2106,7 @@ CONFIGFS_ATTR(, cnp_ecn);
 
 static ssize_t rtt_jitter_en_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2122,7 +2121,7 @@ static ssize_t rtt_jitter_en_show(struct config_item *item, char *buf)
 static ssize_t rtt_jitter_en_store(struct config_item *item, const char *buf,
 				   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2141,7 +2140,7 @@ CONFIGFS_ATTR(, rtt_jitter_en);
 
 static ssize_t lbytes_per_usec_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2156,7 +2155,7 @@ static ssize_t lbytes_per_usec_show(struct config_item *item, char *buf)
 static ssize_t lbytes_per_usec_store(struct config_item *item, const char *buf,
 				     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2176,7 +2175,7 @@ CONFIGFS_ATTR(, lbytes_per_usec);
 
 static ssize_t reset_cc_cr_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2191,7 +2190,7 @@ static ssize_t reset_cc_cr_th_show(struct config_item *item, char *buf)
 static ssize_t reset_cc_cr_th_store(struct config_item *item, const char *buf,
 				    size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2210,7 +2209,7 @@ CONFIGFS_ATTR(, reset_cc_cr_th);
 
 static ssize_t cr_width_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2225,7 +2224,7 @@ static ssize_t cr_width_show(struct config_item *item, char *buf)
 static ssize_t cr_width_store(struct config_item *item, const char *buf,
 			      size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2244,7 +2243,7 @@ CONFIGFS_ATTR(, cr_width);
 
 static ssize_t min_quota_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2259,7 +2258,7 @@ static ssize_t min_quota_show(struct config_item *item, char *buf)
 static ssize_t min_quota_store(struct config_item *item, const char *buf,
 			       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2278,7 +2277,7 @@ CONFIGFS_ATTR(, min_quota);
 
 static ssize_t max_quota_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2293,7 +2292,7 @@ static ssize_t max_quota_show(struct config_item *item, char *buf)
 static ssize_t max_quota_store(struct config_item *item, const char *buf,
 			       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2312,7 +2311,7 @@ CONFIGFS_ATTR(, max_quota);
 
 static ssize_t abs_max_quota_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2327,7 +2326,7 @@ static ssize_t abs_max_quota_show(struct config_item *item, char *buf)
 static ssize_t abs_max_quota_store(struct config_item *item, const char *buf,
 				   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2346,7 +2345,7 @@ CONFIGFS_ATTR(, abs_max_quota);
 
 static ssize_t tr_lb_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2361,7 +2360,7 @@ static ssize_t tr_lb_show(struct config_item *item, char *buf)
 static ssize_t tr_lb_store(struct config_item *item, const char *buf,
 			   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2380,7 +2379,7 @@ CONFIGFS_ATTR(, tr_lb);
 
 static ssize_t cr_prob_fac_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2395,7 +2394,7 @@ static ssize_t cr_prob_fac_show(struct config_item *item, char *buf)
 static ssize_t cr_prob_fac_store(struct config_item *item, const char *buf,
 				 size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2414,7 +2413,7 @@ CONFIGFS_ATTR(, cr_prob_fac);
 
 static ssize_t tr_prob_fac_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2429,7 +2428,7 @@ static ssize_t tr_prob_fac_show(struct config_item *item, char *buf)
 static ssize_t tr_prob_fac_store(struct config_item *item, const char *buf,
 				 size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2448,7 +2447,7 @@ CONFIGFS_ATTR(, tr_prob_fac);
 
 static ssize_t fair_cr_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2463,7 +2462,7 @@ static ssize_t fair_cr_th_show(struct config_item *item, char *buf)
 static ssize_t fair_cr_th_store(struct config_item *item, const char *buf,
 				size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2483,7 +2482,7 @@ CONFIGFS_ATTR(, fair_cr_th);
 
 static ssize_t red_div_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2498,7 +2497,7 @@ static ssize_t red_div_show(struct config_item *item, char *buf)
 static ssize_t red_div_store(struct config_item *item, const char *buf,
 			     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2518,7 +2517,7 @@ CONFIGFS_ATTR(, red_div);
 
 static ssize_t cnp_ratio_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2533,7 +2532,7 @@ static ssize_t cnp_ratio_th_show(struct config_item *item, char *buf)
 static ssize_t cnp_ratio_th_store(struct config_item *item, const char *buf,
 				  size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2553,7 +2552,7 @@ CONFIGFS_ATTR(, cnp_ratio_th);
 
 static ssize_t exp_ai_rtts_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2568,7 +2567,7 @@ static ssize_t exp_ai_rtts_show(struct config_item *item, char *buf)
 static ssize_t exp_ai_rtts_store(struct config_item *item, const char *buf,
 				 size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2588,7 +2587,7 @@ CONFIGFS_ATTR(, exp_ai_rtts);
 
 static ssize_t exp_crcp_ratio_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2603,7 +2602,7 @@ static ssize_t exp_crcp_ratio_show(struct config_item *item, char *buf)
 static ssize_t exp_crcp_ratio_store(struct config_item *item, const char *buf,
 				    size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2623,7 +2622,7 @@ CONFIGFS_ATTR(, exp_crcp_ratio);
 
 static ssize_t rt_en_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2638,7 +2637,7 @@ static ssize_t rt_en_show(struct config_item *item, char *buf)
 static ssize_t rt_en_store(struct config_item *item, const char *buf,
 			   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2658,7 +2657,7 @@ CONFIGFS_ATTR(, rt_en);
 
 static ssize_t cp_exp_update_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2673,7 +2672,7 @@ static ssize_t cp_exp_update_th_show(struct config_item *item, char *buf)
 static ssize_t cp_exp_update_th_store(struct config_item *item,
 				      const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2693,7 +2692,7 @@ CONFIGFS_ATTR(, cp_exp_update_th);
 
 static ssize_t ai_rtt_th1_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2708,7 +2707,7 @@ static ssize_t ai_rtt_th1_show(struct config_item *item, char *buf)
 static ssize_t ai_rtt_th1_store(struct config_item *item, const char *buf,
 				size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2728,7 +2727,7 @@ CONFIGFS_ATTR(, ai_rtt_th1);
 
 static ssize_t ai_rtt_th2_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2743,7 +2742,7 @@ static ssize_t ai_rtt_th2_show(struct config_item *item, char *buf)
 static ssize_t ai_rtt_th2_store(struct config_item *item, const char *buf,
 				size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2763,7 +2762,7 @@ CONFIGFS_ATTR(, ai_rtt_th2);
 
 static ssize_t cf_rtt_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2778,7 +2777,7 @@ static ssize_t cf_rtt_th_show(struct config_item *item, char *buf)
 static ssize_t cf_rtt_th_store(struct config_item *item, const char *buf,
 			       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2798,7 +2797,7 @@ CONFIGFS_ATTR(, cf_rtt_th);
 
 static ssize_t reduce_cf_rtt_th_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2813,7 +2812,7 @@ static ssize_t reduce_cf_rtt_th_show(struct config_item *item, char *buf)
 static ssize_t reduce_cf_rtt_th_store(struct config_item *item, const char *buf,
 			       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2833,7 +2832,7 @@ CONFIGFS_ATTR(, reduce_cf_rtt_th);
 
 static ssize_t sc_cr_th1_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2848,7 +2847,7 @@ static ssize_t sc_cr_th1_show(struct config_item *item, char *buf)
 static ssize_t sc_cr_th1_store(struct config_item *item, const char *buf,
 			       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2868,7 +2867,7 @@ CONFIGFS_ATTR(, sc_cr_th1);
 
 static ssize_t sc_cr_th2_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2883,7 +2882,7 @@ static ssize_t sc_cr_th2_show(struct config_item *item, char *buf)
 static ssize_t sc_cr_th2_store(struct config_item *item, const char *buf,
 			       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2903,7 +2902,7 @@ CONFIGFS_ATTR(, sc_cr_th2);
 
 static ssize_t l64B_per_rtt_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2918,7 +2917,7 @@ static ssize_t l64B_per_rtt_show(struct config_item *item, char *buf)
 static ssize_t l64B_per_rtt_store(struct config_item *item, const char *buf,
 				  size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -2938,7 +2937,7 @@ CONFIGFS_ATTR(, l64B_per_rtt);
 
 static ssize_t cc_ack_bytes_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -2953,7 +2952,7 @@ static ssize_t cc_ack_bytes_show(struct config_item *item, char *buf)
 static ssize_t cc_ack_bytes_store(struct config_item *item, const char *buf,
 				  size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -3171,64 +3170,64 @@ clean_dev:
 }
 
 #ifdef HAVE_OLD_CONFIGFS_API
-static ssize_t bnxt_re_ccgrp_attr_show(struct config_item *item,
-				       struct configfs_attribute *attr,
-				       char *page)
+static ssize_t bnxt_re_cfg_grp_attr_show(struct config_item *item,
+					 struct configfs_attribute *attr,
+					 char *page)
 {
-	struct configfs_attr *ccgrp_attr =
+	struct configfs_attr *grp_attr =
 			container_of(attr, struct configfs_attr, attr);
 	ssize_t rc = -EINVAL;
 
-	if (!ccgrp_attr)
+	if (!grp_attr)
 		goto out;
 
-	if (ccgrp_attr->show)
-		rc = ccgrp_attr->show(item, page);
+	if (grp_attr->show)
+		rc = grp_attr->show(item, page);
 out:
 	return rc;
 }
 
-static ssize_t bnxt_re_ccgrp_attr_store(struct config_item *item,
-					struct configfs_attribute *attr,
-					const char *page, size_t count)
+static ssize_t bnxt_re_cfg_grp_attr_store(struct config_item *item,
+					  struct configfs_attribute *attr,
+					  const char *page, size_t count)
 {
-	struct configfs_attr *ccgrp_attr =
+	struct configfs_attr *grp_attr =
 			container_of(attr, struct configfs_attr, attr);
 	ssize_t rc = -EINVAL;
 
-	if (!ccgrp_attr)
+	if (!grp_attr)
 		goto out;
-	if (ccgrp_attr->store)
-		rc = ccgrp_attr->store(item, page, count);
+	if (grp_attr->store)
+		rc = grp_attr->store(item, page, count);
 out:
 	return rc;
 }
 
-static struct configfs_item_operations bnxt_re_ccgrp_ops = {
-	.show_attribute         = bnxt_re_ccgrp_attr_show,
-	.store_attribute	= bnxt_re_ccgrp_attr_store,
+static struct configfs_item_operations bnxt_re_grp_ops = {
+	.show_attribute		= bnxt_re_cfg_grp_attr_show,
+	.store_attribute	= bnxt_re_cfg_grp_attr_store,
 };
 
 #else
-static struct configfs_item_operations bnxt_re_ccgrp_ops = {
+static struct configfs_item_operations bnxt_re_grp_ops = {
 };
 #endif
 
 static struct config_item_type bnxt_re_ccgrp_type = {
 	.ct_attrs = bnxt_re_cc_attrs,
-	.ct_item_ops = &bnxt_re_ccgrp_ops,
+	.ct_item_ops = &bnxt_re_grp_ops,
 	.ct_owner = THIS_MODULE,
 };
 
 static struct config_item_type bnxt_re_ccgrp_type_ext = {
 	.ct_attrs = bnxt_re_cc_attrs_ext,
-	.ct_item_ops = &bnxt_re_ccgrp_ops,
+	.ct_item_ops = &bnxt_re_grp_ops,
 	.ct_owner = THIS_MODULE,
 };
 
 static struct config_item_type bnxt_re_ccgrp_type_ext2 = {
 	.ct_attrs = bnxt_re_cc_attrs_ext2,
-	.ct_item_ops = &bnxt_re_ccgrp_ops,
+	.ct_item_ops = &bnxt_re_grp_ops,
 	.ct_owner = THIS_MODULE,
 };
 
@@ -3236,7 +3235,7 @@ static int make_bnxt_re_cc(struct bnxt_re_port_group *portgrp,
 			   struct bnxt_re_dev *rdev, u32 gidx)
 {
 	struct config_item_type *grp_type;
-	struct bnxt_re_cc_group *ccgrp;
+	struct bnxt_re_cfg_group *ccgrp;
 	int rc;
 
 	/*
@@ -3281,7 +3280,7 @@ out:
 
 static ssize_t min_tx_depth_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3296,7 +3295,7 @@ static ssize_t min_tx_depth_show(struct config_item *item, char *buf)
 static ssize_t min_tx_depth_store(struct config_item *item, const char *buf,
 				  size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 	int rc;
@@ -3307,10 +3306,10 @@ static ssize_t min_tx_depth_store(struct config_item *item, const char *buf,
 	if (!rdev)
 		return -EINVAL;
 	rc = sscanf(buf, "%u\n", &val);
-	if (val > rdev->dev_attr->max_qp_wqes || rc <= 0) {
+	if (val > rdev->dev_attr->max_sq_wqes || rc <= 0) {
 		dev_err(rdev_to_dev(rdev),
-			"min_tx_depth %u cannot be greater than max_qp_wqes %u",
-			val, rdev->dev_attr->max_qp_wqes);
+			"min_tx_depth %u cannot be greater than max_sq_wqes %u",
+			val, rdev->dev_attr->max_sq_wqes);
 		return -EINVAL;
 	}
 
@@ -3323,7 +3322,7 @@ CONFIGFS_ATTR(, min_tx_depth);
 
 static ssize_t stats_query_sec_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3338,7 +3337,7 @@ static ssize_t stats_query_sec_show(struct config_item *item, char *buf)
 static ssize_t stats_query_sec_store(struct config_item *item, const char *buf,
 				     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val;
 
@@ -3368,9 +3367,9 @@ CONFIGFS_ATTR(, stats_query_sec);
 static ssize_t gsi_qp_mode_store(struct config_item *item,
 				 const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev, *new_rdev = NULL;
-	struct mutex *mutexp; /* Aquire subsys mutex */
+	struct mutex *mutexp; /* Acquire subsys mutex */
 	u32 gsi_mode;
 	u8 wqe_mode;
 	int rc;
@@ -3378,7 +3377,7 @@ static ssize_t gsi_qp_mode_store(struct config_item *item,
 	if (!ccgrp)
 		return -EINVAL;
 
-	/* Hold the subsytem lock to serialize */
+	/* Hold the subsystem lock to serialize */
 	mutexp = &item->ci_group->cg_subsys->su_mutex;
 	mutex_lock(mutexp);
 	rdev = bnxt_re_get_valid_rdev(ccgrp);
@@ -3446,7 +3445,7 @@ static inline const char * mode_to_str(u8 gsi_mode)
 
 static ssize_t gsi_qp_mode_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	int bytes = 0;
 	u8 gsi_mode;
@@ -3494,7 +3493,7 @@ static const char *bnxt_re_wqe_mode_to_str [] = {
 
 static ssize_t wqe_mode_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_qplib_drv_modes *drv_mode;
 	struct bnxt_re_dev *rdev;
 
@@ -3514,7 +3513,7 @@ static ssize_t wqe_mode_show(struct config_item *item, char *buf)
 static ssize_t wqe_mode_store(struct config_item *item, const char *buf,
 			      size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev, *new_rdev = NULL;
 	struct bnxt_qplib_drv_modes *drv_mode;
 	struct mutex *mutexp; /* subsys lock */
@@ -3556,7 +3555,7 @@ CONFIGFS_ATTR(, wqe_mode);
 
 static ssize_t acc_tx_path_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_qplib_drv_modes *drv_mode;
 	struct bnxt_re_dev *rdev;
 
@@ -3575,7 +3574,7 @@ static ssize_t acc_tx_path_show(struct config_item *item, char *buf)
 static ssize_t acc_tx_path_store(struct config_item *item, const char *buf,
 				 size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_en_dev_info *en_info;
 	struct bnxt_qplib_drv_modes *drv_mode;
 	struct bnxt_re_dev *rdev;
@@ -3611,7 +3610,7 @@ CONFIGFS_ATTR(, acc_tx_path);
 
 static ssize_t en_qp_dbg_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3626,7 +3625,7 @@ static ssize_t en_qp_dbg_show(struct config_item *item, char *buf)
 static ssize_t en_qp_dbg_store(struct config_item *item, const char *buf,
 			       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val = 0;
 
@@ -3654,7 +3653,7 @@ CONFIGFS_ATTR(, en_qp_dbg);
 
 static ssize_t user_dbr_drop_recov_timeout_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3669,7 +3668,7 @@ static ssize_t user_dbr_drop_recov_timeout_show(struct config_item *item, char *
 static ssize_t user_dbr_drop_recov_timeout_store(struct config_item *item, const char *buf,
 						 size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val = 0;
 
@@ -3692,7 +3691,7 @@ CONFIGFS_ATTR(, user_dbr_drop_recov_timeout);
 
 static ssize_t user_dbr_drop_recov_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3706,7 +3705,7 @@ static ssize_t user_dbr_drop_recov_show(struct config_item *item, char *buf)
 
 static ssize_t user_dbr_drop_recov_store(struct config_item *item, const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val = 0;
 	int rc = 0;
@@ -3754,7 +3753,7 @@ CONFIGFS_ATTR(, user_dbr_drop_recov);
 
 static ssize_t dbr_pacing_enable_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3773,7 +3772,7 @@ static ssize_t dbr_pacing_enable_show(struct config_item *item, char *buf)
 static ssize_t dbr_pacing_enable_store(struct config_item *item, const char *buf,
 				       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	struct bnxt_qplib_nq *nq;
 	unsigned int val = 0;
@@ -3827,7 +3826,7 @@ CONFIGFS_ATTR(, dbr_pacing_enable);
 static ssize_t dbr_pacing_dbq_watermark_show(struct config_item *item,
 					     char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3842,7 +3841,7 @@ static ssize_t dbr_pacing_dbq_watermark_show(struct config_item *item,
 static ssize_t dbr_pacing_dbq_watermark_store(struct config_item *item,
 					      const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	struct bnxt_qplib_nq *nq;
 	unsigned int val = 0;
@@ -3877,7 +3876,7 @@ CONFIGFS_ATTR(, dbr_pacing_dbq_watermark);
 
 static ssize_t dbr_pacing_time_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3892,7 +3891,7 @@ static ssize_t dbr_pacing_time_show(struct config_item *item, char *buf)
 static ssize_t dbr_pacing_time_store(struct config_item *item, const char *buf,
 				     size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val = 0;
 
@@ -3912,7 +3911,7 @@ CONFIGFS_ATTR(, dbr_pacing_time);
 
 static ssize_t dbr_pacing_primary_fn_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3928,7 +3927,7 @@ static ssize_t dbr_pacing_primary_fn_show(struct config_item *item, char *buf)
 static ssize_t dbr_pacing_primary_fn_store(struct config_item *item, const char *buf,
 					   size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val = 0;
 	int rc = 0;
@@ -3962,7 +3961,7 @@ CONFIGFS_ATTR(, dbr_pacing_primary_fn);
 
 static ssize_t dbr_pacing_algo_threshold_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -3977,7 +3976,7 @@ static ssize_t dbr_pacing_algo_threshold_show(struct config_item *item, char *bu
 static ssize_t dbr_pacing_algo_threshold_store(struct config_item *item,
 					       const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val = 0;
 
@@ -4001,7 +4000,7 @@ CONFIGFS_ATTR(, dbr_pacing_algo_threshold);
 
 static ssize_t dbr_pacing_en_int_threshold_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -4016,7 +4015,7 @@ static ssize_t dbr_pacing_en_int_threshold_show(struct config_item *item, char *
 static ssize_t dbr_pacing_en_int_threshold_store(struct config_item *item,
 						 const char *buf, size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val = 0;
 
@@ -4039,7 +4038,7 @@ CONFIGFS_ATTR(, dbr_pacing_en_int_threshold);
 
 static ssize_t dbr_def_do_pacing_show(struct config_item *item, char *buf)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 
 	if (!ccgrp)
@@ -4054,7 +4053,7 @@ static ssize_t dbr_def_do_pacing_show(struct config_item *item, char *buf)
 static ssize_t dbr_def_do_pacing_store(struct config_item *item, const char *buf,
 				       size_t count)
 {
-	struct bnxt_re_cc_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
 	struct bnxt_re_dev *rdev;
 	unsigned int val = 0;
 
@@ -4074,6 +4073,417 @@ static ssize_t dbr_def_do_pacing_store(struct config_item *item, const char *buf
 
 CONFIGFS_ATTR(, dbr_def_do_pacing);
 
+static ssize_t cq_coal_buf_maxtime_show(struct config_item *item, char *buf)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_dev *rdev;
+
+	if (!ccgrp)
+		return -EINVAL;
+
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+	return sprintf(buf, "%#x\n", rdev->cq_coalescing.buf_maxtime);
+}
+
+static ssize_t cq_coal_buf_maxtime_store(struct config_item *item, const char *buf,
+					 size_t count)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_dev *rdev;
+	unsigned int val = 0;
+
+	if (!ccgrp)
+		return -EINVAL;
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+	if (sscanf(buf, "%x\n", &val) != 1)
+		return -EINVAL;
+	if (val < 1 || val > BNXT_QPLIB_CQ_COAL_MAX_BUF_MAXTIME)
+		return -EINVAL;
+	rdev->cq_coalescing.buf_maxtime = val;
+	return strnlen(buf, count);
+}
+
+CONFIGFS_ATTR(, cq_coal_buf_maxtime);
+
+static ssize_t cq_coal_normal_maxbuf_show(struct config_item *item, char *buf)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_dev *rdev;
+
+	if (!ccgrp)
+		return -EINVAL;
+
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+	return sprintf(buf, "%#x\n", rdev->cq_coalescing.normal_maxbuf);
+}
+
+static ssize_t cq_coal_normal_maxbuf_store(struct config_item *item, const char *buf,
+					   size_t count)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_dev *rdev;
+	unsigned int val = 0;
+
+	if (!ccgrp)
+		return -EINVAL;
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+	if (sscanf(buf, "%x\n", &val) != 1)
+		return -EINVAL;
+	if (val < 1 || val > BNXT_QPLIB_CQ_COAL_MAX_NORMAL_MAXBUF)
+		return -EINVAL;
+	rdev->cq_coalescing.normal_maxbuf = val;
+	return strnlen(buf, count);
+}
+
+CONFIGFS_ATTR(, cq_coal_normal_maxbuf);
+
+static ssize_t cq_coal_during_maxbuf_show(struct config_item *item, char *buf)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_dev *rdev;
+
+	if (!ccgrp)
+		return -EINVAL;
+
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+	return sprintf(buf, "%#x\n", rdev->cq_coalescing.during_maxbuf);
+}
+
+static ssize_t cq_coal_during_maxbuf_store(struct config_item *item, const char *buf,
+					   size_t count)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_dev *rdev;
+	unsigned int val = 0;
+
+	if (!ccgrp)
+		return -EINVAL;
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+	if (sscanf(buf, "%x\n", &val) != 1)
+		return -EINVAL;
+	if (val < 1 || val > BNXT_QPLIB_CQ_COAL_MAX_DURING_MAXBUF)
+		return -EINVAL;
+	rdev->cq_coalescing.during_maxbuf = val;
+	return strnlen(buf, count);
+}
+
+CONFIGFS_ATTR(, cq_coal_during_maxbuf);
+
+static ssize_t cq_coal_en_ring_idle_mode_show(struct config_item *item, char *buf)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_dev *rdev;
+
+	if (!ccgrp)
+		return -EINVAL;
+
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+	return sprintf(buf, "%#x\n", rdev->cq_coalescing.en_ring_idle_mode);
+}
+
+static ssize_t cq_coal_en_ring_idle_mode_store(struct config_item *item, const char *buf,
+					       size_t count)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_dev *rdev;
+	unsigned int val = 0;
+
+	if (!ccgrp)
+		return -EINVAL;
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+	if (sscanf(buf, "%x\n", &val) != 1)
+		return -EINVAL;
+	if (val > BNXT_QPLIB_CQ_COAL_MAX_EN_RING_IDLE_MODE)
+		return -EINVAL;
+	rdev->cq_coalescing.en_ring_idle_mode = val;
+	return strnlen(buf, count);
+}
+
+CONFIGFS_ATTR(, cq_coal_en_ring_idle_mode);
+
+#if defined(CONFIGFS_BIN_ATTR)
+static ssize_t
+config_read(struct config_item *item, void *data, size_t count)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct hwrm_udcc_comp_qcfg_input req = {};
+	struct hwrm_udcc_comp_qcfg_output resp;
+	struct bnxt_fw_msg fw_msg = {};
+	struct bnxt_re_udcc_cfg *udcc;
+	struct bnxt_en_dev *en_dev;
+	struct bnxt_re_dev *rdev;
+	int rc;
+
+	if (!ccgrp)
+		return -EINVAL;
+
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+
+	udcc = &rdev->udcc_cfg;
+	en_dev = rdev->en_dev;
+
+	if (!udcc->max_comp_cfg_xfer) {
+		dev_err(rdev_to_dev(rdev),
+			"udcc: can not proceed with %s, max: %d\n",
+			__func__, udcc->max_comp_cfg_xfer);
+		return -EINVAL;
+	}
+
+	bnxt_re_init_hwrm_hdr((void *)&req, HWRM_UDCC_COMP_QCFG, -1);
+
+	req.arg_len = cpu_to_le32(udcc->cfg_arg_len);
+	memcpy(&req.arg_buf, &udcc->cfg_arg, udcc->cfg_arg_len);
+
+	udcc->cfg = dma_alloc_coherent(&en_dev->pdev->dev, udcc->max_comp_cfg_xfer,
+				       &udcc->cfg_map, GFP_KERNEL);
+	if (!udcc->cfg)
+		return -ENOMEM;
+
+	req.cfg_host_buf_size = cpu_to_le32(udcc->max_comp_cfg_xfer);
+	req.cfg_host_addr[1] = cpu_to_le32(upper_32_bits(udcc->cfg_map));
+	req.cfg_host_addr[0] = cpu_to_le32(lower_32_bits(udcc->cfg_map));
+
+	bnxt_re_fill_fw_msg(&fw_msg, (void *)&req, sizeof(req), (void *)&resp,
+			    sizeof(resp), BNXT_RE_HWRM_CMD_TIMEOUT(rdev));
+
+	rc = bnxt_send_msg(rdev->en_dev, &fw_msg);
+	if (rc) {
+		dev_err(rdev_to_dev(rdev),
+			"Failed to do udcc comp cfg, rc = %#x", rc);
+		goto exit;
+	}
+
+	udcc->cfg_len = le32_to_cpu(resp.cfg_len);
+
+	if (!udcc->cfg_len)
+		dev_err(rdev_to_dev(rdev), "udcc: %s cfg_len is zero\n", __func__);
+	else if (data)
+		memcpy(data, udcc->cfg, udcc->cfg_len);
+exit:
+	dma_free_coherent(&en_dev->pdev->dev, udcc->max_comp_cfg_xfer, udcc->cfg,
+			  udcc->cfg_map);
+	return rc ? : udcc->cfg_len;
+}
+
+static ssize_t
+config_write(struct config_item *item, const void *data, size_t count)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct hwrm_udcc_comp_cfg_input req = {};
+	struct hwrm_udcc_comp_cfg_output resp;
+	struct bnxt_fw_msg fw_msg = {};
+	struct bnxt_re_udcc_cfg *udcc;
+	struct bnxt_en_dev *en_dev;
+	struct bnxt_re_dev *rdev;
+	int rc;
+
+	if (!ccgrp)
+		return -EINVAL;
+
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+
+	udcc = &rdev->udcc_cfg;
+	en_dev = rdev->en_dev;
+
+	if (!udcc->max_comp_cfg_xfer || count > udcc->max_comp_cfg_xfer) {
+		dev_err(rdev_to_dev(rdev),
+			"udcc: can not proceed with %s, requested: %lu, max: %d\n",
+			__func__, count, udcc->max_comp_cfg_xfer);
+		return -EINVAL;
+	}
+
+	bnxt_re_init_hwrm_hdr((void *)&req, HWRM_UDCC_COMP_CFG, -1);
+
+	req.arg_len = cpu_to_le32(udcc->cfg_arg_len);
+	memcpy(&req.arg_buf, &udcc->cfg_arg, udcc->cfg_arg_len);
+
+	udcc->cfg = dma_alloc_coherent(&en_dev->pdev->dev, udcc->max_comp_cfg_xfer,
+				       &udcc->cfg_map, GFP_KERNEL);
+	if (!udcc->cfg)
+		return -ENOMEM;
+
+	memcpy(udcc->cfg, data, count);
+
+	req.cfg_len = cpu_to_le32(count);
+	req.cfg_host_addr[1] = cpu_to_le32(upper_32_bits(udcc->cfg_map));
+	req.cfg_host_addr[0] = cpu_to_le32(lower_32_bits(udcc->cfg_map));
+
+	bnxt_re_fill_fw_msg(&fw_msg, (void *)&req, sizeof(req), (void *)&resp,
+			    sizeof(resp), BNXT_RE_HWRM_CMD_TIMEOUT(rdev));
+
+	rc = bnxt_send_msg(rdev->en_dev, &fw_msg);
+	if (rc)
+		dev_err(rdev_to_dev(rdev), "Failed to do udcc cfg, rc = %#x", rc);
+
+	dma_free_coherent(&en_dev->pdev->dev, udcc->max_comp_cfg_xfer, udcc->cfg,
+			  udcc->cfg_map);
+	return rc ? : udcc->cfg_len;
+}
+
+CONFIGFS_BIN_ATTR(, config, NULL, 4096);
+
+static ssize_t
+config_args_write(struct config_item *item, const void *data, size_t count)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_udcc_cfg *udcc;
+	struct bnxt_re_dev *rdev;
+
+	if (!ccgrp)
+		return -EINVAL;
+
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+
+	udcc = &rdev->udcc_cfg;
+
+	if (!count || count > sizeof(udcc->cfg_arg)) {
+		dev_err(rdev_to_dev(rdev),
+			"udcc: can not proceed with %s, count: %lu, max: %ld\n",
+			__func__, count, sizeof(udcc->cfg_arg));
+		return -EINVAL;
+	}
+
+	udcc->cfg_arg_len = count;
+	memcpy(&udcc->cfg_arg, data, count);
+
+	return count;
+}
+
+CONFIGFS_BIN_ATTR_WO(, config_args, NULL, 4096);
+
+static ssize_t
+data_read(struct config_item *item, void *data, size_t count)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct hwrm_udcc_comp_query_input req = {};
+	struct hwrm_udcc_comp_query_output resp;
+	struct bnxt_fw_msg fw_msg = {};
+	struct bnxt_re_udcc_cfg *udcc;
+	struct bnxt_en_dev *en_dev;
+	struct bnxt_re_dev *rdev;
+	int rc;
+
+	if (!ccgrp)
+		return -EINVAL;
+
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+
+	udcc = &rdev->udcc_cfg;
+	en_dev = rdev->en_dev;
+
+	if (!udcc->max_comp_data_xfer) {
+		dev_err(rdev_to_dev(rdev),
+			"udcc: can not proceed with %s, max_comp_data_xfer: %d\n",
+			__func__, udcc->max_comp_data_xfer);
+		return -EINVAL;
+	}
+
+	udcc->data = dma_alloc_coherent(&en_dev->pdev->dev, udcc->max_comp_data_xfer,
+					&udcc->data_map, GFP_KERNEL);
+	if (!udcc->data)
+		return -ENOMEM;
+
+	bnxt_re_init_hwrm_hdr((void *)&req, HWRM_UDCC_COMP_QUERY, -1);
+
+	req.arg_len = cpu_to_le32(udcc->data_arg_len);
+	memcpy(&req.arg_buf, &udcc->data_arg, udcc->data_arg_len);
+	req.data_host_buf_size = cpu_to_le32(udcc->max_comp_data_xfer);
+	req.data_host_addr[1] = cpu_to_le32(upper_32_bits(udcc->data_map));
+	req.data_host_addr[0] = cpu_to_le32(lower_32_bits(udcc->data_map));
+
+	bnxt_re_fill_fw_msg(&fw_msg, (void *)&req, sizeof(req), (void *)&resp,
+			    sizeof(resp), BNXT_RE_HWRM_CMD_TIMEOUT(rdev));
+
+	rc = bnxt_send_msg(rdev->en_dev, &fw_msg);
+	if (rc) {
+		dev_err(rdev_to_dev(rdev),
+			"Failed to do udcc comp query, rc = %#x", rc);
+		goto exit;
+	}
+
+	udcc->data_len = le32_to_cpu(resp.data_len);
+	if (!udcc->data_len)
+		dev_err(rdev_to_dev(rdev), "udcc: %s cfg_len is zero\n", __func__);
+	else if (data)
+		memcpy(data, udcc->data, udcc->data_len);
+exit:
+	dma_free_coherent(&en_dev->pdev->dev, udcc->max_comp_data_xfer, udcc->data,
+			  udcc->data_map);
+	return rc ? : udcc->data_len;
+}
+
+CONFIGFS_BIN_ATTR_RO(, data, NULL, 4096);
+
+static ssize_t
+data_args_write(struct config_item *item, const void *data, size_t count)
+{
+	struct bnxt_re_cfg_group *ccgrp = __get_cc_group(item);
+	struct bnxt_re_udcc_cfg *udcc;
+	struct bnxt_re_dev *rdev;
+
+	if (!ccgrp)
+		return -EINVAL;
+
+	rdev = bnxt_re_get_valid_rdev(ccgrp);
+	if (!rdev)
+		return -EINVAL;
+
+	udcc = &rdev->udcc_cfg;
+
+	if (!count || count > sizeof(udcc->cfg_arg)) {
+		dev_err(rdev_to_dev(rdev),
+			"udcc: can not proceed with %s, count: %lu, max: %ld\n",
+			__func__, count, sizeof(udcc->cfg_arg));
+		return -EINVAL;
+	}
+
+	udcc->data_arg_len = count;
+	memcpy(&udcc->data_arg, data, count);
+
+	return count;
+}
+
+CONFIGFS_BIN_ATTR_WO(, data_args, NULL, 4096);
+
+static struct configfs_bin_attribute *bnxt_re_udcc_bin_attrs[] = {
+	CONFIGFS_ATTR_ADD(attr_config),
+	CONFIGFS_ATTR_ADD(attr_config_args),
+	CONFIGFS_ATTR_ADD(attr_data),
+	CONFIGFS_ATTR_ADD(attr_data_args),
+	NULL,
+};
+
+static struct config_item_type bnxt_re_udccgrp_type = {
+	.ct_bin_attrs = bnxt_re_udcc_bin_attrs,
+	.ct_item_ops = &bnxt_re_grp_ops,
+	.ct_owner = THIS_MODULE,
+};
+#endif
+
 static struct configfs_attribute *bnxt_re_tun_attrs[] = {
 	CONFIGFS_ATTR_ADD(attr_min_tx_depth),
 	CONFIGFS_ATTR_ADD(attr_stats_query_sec),
@@ -4090,6 +4500,10 @@ static struct configfs_attribute *bnxt_re_tun_attrs[] = {
 	CONFIGFS_ATTR_ADD(attr_dbr_def_do_pacing),
 	CONFIGFS_ATTR_ADD(attr_user_dbr_drop_recov),
 	CONFIGFS_ATTR_ADD(attr_user_dbr_drop_recov_timeout),
+	CONFIGFS_ATTR_ADD(attr_cq_coal_buf_maxtime),
+	CONFIGFS_ATTR_ADD(attr_cq_coal_normal_maxbuf),
+	CONFIGFS_ATTR_ADD(attr_cq_coal_during_maxbuf),
+	CONFIGFS_ATTR_ADD(attr_cq_coal_en_ring_idle_mode),
 	NULL,
 };
 
@@ -4102,80 +4516,36 @@ static struct configfs_attribute *bnxt_re_p7_tun_attrs[] = {
 	CONFIGFS_ATTR_ADD(attr_dbr_pacing_enable),
 	CONFIGFS_ATTR_ADD(attr_dbr_pacing_time),
 	CONFIGFS_ATTR_ADD(attr_dbr_pacing_algo_threshold),
-	CONFIGFS_ATTR_ADD(attr_dbr_pacing_en_int_threshold),
 	CONFIGFS_ATTR_ADD(attr_dbr_def_do_pacing),
 	CONFIGFS_ATTR_ADD(attr_user_dbr_drop_recov),
 	CONFIGFS_ATTR_ADD(attr_user_dbr_drop_recov_timeout),
+	CONFIGFS_ATTR_ADD(attr_cq_coal_buf_maxtime),
+	CONFIGFS_ATTR_ADD(attr_cq_coal_normal_maxbuf),
+	CONFIGFS_ATTR_ADD(attr_cq_coal_during_maxbuf),
+	CONFIGFS_ATTR_ADD(attr_cq_coal_en_ring_idle_mode),
 	NULL,
 };
 
-#ifdef HAVE_OLD_CONFIGFS_API
-static ssize_t bnxt_re_tungrp_attr_show(struct config_item *item,
-					struct configfs_attribute *attr,
-					char *page)
-{
-	struct configfs_attr *tungrp_attr =
-			container_of(attr, struct configfs_attr, attr);
-	ssize_t rc = -EINVAL;
-
-	if (!tungrp_attr)
-		goto out;
-
-	if (tungrp_attr->show)
-		rc = tungrp_attr->show(item, page);
-out:
-	return rc;
-}
-
-static ssize_t bnxt_re_tungrp_attr_store(struct config_item *item,
-					 struct configfs_attribute *attr,
-					 const char *page, size_t count)
-{
-	struct configfs_attr *tungrp_attr =
-			container_of(attr, struct configfs_attr, attr);
-	ssize_t rc = -EINVAL;
-
-	if (!tungrp_attr)
-		goto out;
-	if (tungrp_attr->store)
-		rc = tungrp_attr->store(item, page, count);
-out:
-	return rc;
-}
-
-static struct configfs_item_operations bnxt_re_tungrp_ops = {
-	.show_attribute         = bnxt_re_tungrp_attr_show,
-	.store_attribute	= bnxt_re_tungrp_attr_store,
-};
-
-#else
-static struct configfs_item_operations bnxt_re_tungrp_ops = {
-};
-#endif
-
 static struct config_item_type bnxt_re_tungrp_type = {
 	.ct_attrs = bnxt_re_tun_attrs,
-	.ct_item_ops = &bnxt_re_tungrp_ops,
+	.ct_item_ops = &bnxt_re_grp_ops,
 	.ct_owner = THIS_MODULE,
 };
 
 static struct config_item_type bnxt_re_p7_tungrp_type = {
 	.ct_attrs = bnxt_re_p7_tun_attrs,
-	.ct_item_ops = &bnxt_re_tungrp_ops,
+	.ct_item_ops = &bnxt_re_grp_ops,
 	.ct_owner = THIS_MODULE,
 };
 
 static int make_bnxt_re_tunables(struct bnxt_re_port_group *portgrp,
 				 struct bnxt_re_dev *rdev, u32 gidx)
 {
-	struct bnxt_re_tunable_group *tungrp;
-	int rc;
+	struct bnxt_re_cfg_group *tungrp;
 
 	tungrp = kzalloc(sizeof(*tungrp), GFP_KERNEL);
-	if (!tungrp) {
-		rc = -ENOMEM;
-		goto out;
-	}
+	if (!tungrp)
+		return -ENOMEM;
 
 	tungrp->rdev = rdev;
 	if (_is_chip_p7(rdev->chip_ctx))
@@ -4195,16 +4565,42 @@ static int make_bnxt_re_tunables(struct bnxt_re_port_group *portgrp,
 	tungrp->portgrp = portgrp;
 
 	return 0;
-out:
-	kfree(tungrp);
-	return rc;
 }
 
+#if defined(CONFIGFS_BIN_ATTR)
+static int make_bnxt_re_udcc(struct bnxt_re_port_group *portgrp,
+			     struct bnxt_re_dev *rdev, u32 gidx)
+{
+	struct bnxt_re_cfg_group *udccgrp;
+
+	udccgrp = kzalloc(sizeof(*udccgrp), GFP_KERNEL);
+	if (!udccgrp)
+		return -ENOMEM;
+
+	udccgrp->rdev = rdev;
+	config_group_init_type_name(&udccgrp->group, "udcc",
+				    &bnxt_re_udccgrp_type);
+#ifndef HAVE_CFGFS_ADD_DEF_GRP
+	portgrp->nportgrp.default_groups = portgrp->default_grp;
+	portgrp->default_grp[gidx] = &udccgrp->group;
+	portgrp->default_grp[gidx + 1] = NULL;
+#else
+	configfs_add_default_group(&udccgrp->group, &portgrp->nportgrp);
+#endif
+	portgrp->udccgrp = udccgrp;
+	udccgrp->portgrp = portgrp;
+
+	return 0;
+}
+#endif
 
 static void bnxt_re_release_nport_group(struct bnxt_re_port_group *portgrp)
 {
 	kfree(portgrp->ccgrp);
 	kfree(portgrp->tungrp);
+#if defined(CONFIGFS_BIN_ATTR)
+	kfree(portgrp->udccgrp);
+#endif
 }
 
 static struct config_item_type bnxt_re_nportgrp_type = {
@@ -4252,6 +4648,15 @@ static int make_bnxt_re_ports(struct bnxt_re_dev_group *devgrp,
 		rc = make_bnxt_re_tunables(&ports[indx], rdev, 1);
 		if (rc)
 			goto out;
+
+#if defined(CONFIGFS_BIN_ATTR)
+		if (!rdev->is_virtfn && bnxt_qplib_udcc_supported(rdev->chip_ctx)) {
+			rc = make_bnxt_re_udcc(&ports[indx], rdev, 2);
+			if (rc)
+				goto out;
+		}
+#endif
+
 #ifndef HAVE_CFGFS_ADD_DEF_GRP
 		portsgrp[indx] = &ports[indx].nportgrp;
 #else

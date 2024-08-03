@@ -130,34 +130,6 @@ EXTRA_CFLAGS += -I$(BNXT_EN_INC)
 # Distro specific compilation flags
 DISTRO_CFLAG = -D__LINUX
 
-ifneq ($(shell grep "netdev_notifier_info_to_dev" $(LINUXSRC)/include/linux/netdevice.h > /dev/null 2>&1 && echo netdev_not),)
-  DISTRO_CFLAG += -DHAVE_NETDEV_NOTIFIER_INFO_TO_DEV
-endif
-
-ifneq ($(shell grep "NETDEV_PRE_CHANGEADDR" $(LINUXSRC)/include/linux/netdevice.h > /dev/null 2>&1 && echo netdev_not),)
-  DISTRO_CFLAG += -DHAVE_NETDEV_PRE_CHANGEADDR
-endif
-
-ifneq ($(shell grep "NETDEV_CVLAN_FILTER_PUSH_INFO" $(LINUXSRC)/include/linux/netdevice.h > /dev/null 2>&1 && echo netdev_not),)
-  DISTRO_CFLAG += -DHAVE_NETDEV_CVLAN_FILTER_PUSH_INFO
-endif
-
-ifneq ($(shell grep "NETDEV_UDP_TUNNEL_DROP_INFO" $(LINUXSRC)/include/linux/netdevice.h > /dev/null 2>&1 && echo netdev_not),)
-  DISTRO_CFLAG += -DHAVE_NETDEV_UDP_TUNNEL_DROP_INFO
-endif
-
-ifneq ($(shell grep -o "NETDEV_CHANGE_TX_QUEUE_LEN" $(LINUXSRC)/include/linux/netdevice.h),)
-  DISTRO_CFLAG += -DHAVE_NETDEV_CHANGE_TX_QUEUE_LEN
-endif
-
-ifneq ($(shell grep -o "NETDEV_PRECHANGEUPPER" $(LINUXSRC)/include/linux/netdevice.h),)
-  DISTRO_CFLAG += -DHAVE_NETDEV_PRECHANGEUPPER
-endif
-
-ifneq ($(shell grep -o "NETDEV_CHANGELOWERSTATE" $(LINUXSRC)/include/linux/netdevice.h),)
-  DISTRO_CFLAG += -DHAVE_NETDEV_CHANGELOWERSTATE
-endif
-
 ifneq ($(shell grep "register_netdevice_notifier_rh" $(LINUXSRC)/include/linux/netdevice.h > /dev/null 2>&1 && echo register_net),)
   DISTRO_CFLAG += -DHAVE_REGISTER_NETDEVICE_NOTIFIER_RH
 endif
@@ -182,20 +154,22 @@ ifneq ($(shell grep "rdma_ah_init_attr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs
   DISTRO_CFLAG += -DHAVE_RDMA_AH_INIT_ATTR
 endif
 
-ifneq ($(shell grep -so "ib_bind_mw" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo ib_bind_mw),)
-  DISTRO_CFLAG += -DHAVE_IB_BIND_MW
-endif
-
-ifneq ($(shell grep "ib_create_mr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo ib_create_mr),)
-  DISTRO_CFLAG += -DHAVE_IB_CREATE_MR
-endif
-
 ifneq ($(shell grep "ib_flow" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo ib_flow),)
   DISTRO_CFLAG += -DHAVE_IB_FLOW
 endif
 
 ifneq ($(shell grep "rereg_user_mr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo rereg_user_mr),)
   DISTRO_CFLAG += -DHAVE_IB_REREG_USER_MR
+endif
+
+ifneq ($(shell grep "fill_res_mr_entry" $(LINUXSRC)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fill_res_mr_entry),)
+  DISTRO_CFLAG += -DHAVE_RDMA_RESTRACK_OPS
+  ifneq ($(shell grep "fill_res_srq_entry" $(LINUXSRC)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fill_res_srq_entry),)
+    DISTRO_CFLAG += -DHAVE_IB_RES_SRQ_ENTRY
+    ifneq ($(shell grep "fill_res_srq_entry_raw" $(LINUXSRC)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fill_res_srq_entry_raw),)
+      DISTRO_CFLAG += -DHAVE_IB_RES_SRQ_ENTRY_RAW
+    endif
+  endif
 endif
 
 ifneq ($(shell grep "MEM_WINDOW_TYPE" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo mem_window_type),)
@@ -259,14 +233,6 @@ ifneq ($(shell grep "alloc_mr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev
   DISTRO_CFLAG += -DHAVE_IB_ALLOC_MR
 endif
 
-ifneq ($(shell grep "query_mr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo query_mr),)
-  DISTRO_CFLAG += -DHAVE_IB_QUERY_MR
-endif
-
-ifneq ($(shell grep "alloc_fast_reg_mr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fast_reg_mr),)
-  DISTRO_CFLAG += -DHAVE_IB_FAST_REG_MR
-endif
-
 ifneq ($(shell grep "map_mr_sg" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo map_mr_sg),)
   DISTRO_CFLAG += -DHAVE_IB_MAP_MR_SG
 endif
@@ -291,10 +257,6 @@ ifneq ($(shell grep "rdma_wr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/
   DISTRO_CFLAG += -DHAVE_IB_RDMA_WR
 endif
 
-ifneq ($(shell grep "reg_phys_mr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo reg_phys_mr),)
-  DISTRO_CFLAG += -DHAVE_IB_REG_PHYS_MR
-endif
-
 ifneq ($(shell grep "ud_wr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo ud_wr),)
   DISTRO_CFLAG += -DHAVE_IB_UD_WR
 endif
@@ -316,106 +278,6 @@ endif
 
 ifneq ($(shell grep "WIDTH_2X" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo width_2x),)
   DISTRO_CFLAG += -DHAVE_IB_WIDTH_2X
-endif
-
-ifneq ($(shell grep -o "sriov_configure" $(LINUXSRC)/include/linux/pci.h),)
-  DISTRO_CFLAG += -DPCIE_SRIOV_CONFIGURE
-  ifneq ($(shell grep -A 2 "pci_driver_rh" $(LINUXSRC)/include/linux/pci.h | \
-                 grep -o "sriov_configure"),)
-    DISTRO_CFLAG += -DSRIOV_CONF_DEF_IN_PCI_DRIVER_RH
-  endif
-endif
-
-ifneq ($(shell ls $(LINUXSRC)/include/net/flow_offload.h > /dev/null 2>&1 && echo flow_offload),)
-  DISTRO_CFLAG += -DHAVE_FLOW_OFFLOAD_H
-  ifneq ($(shell grep -so "struct flow_cls_offload" $(LINUXSRC)/include/net/flow_offload.h),)
-    DISTRO_CFLAG += -DHAVE_TC_FLOW_CLS_OFFLOAD
-  endif
-  ifneq ($(shell grep -o "flow_block_cb_setup_simple" $(LINUXSRC)/include/net/flow_offload.h),)
-    DISTRO_CFLAG += -DHAVE_SETUP_TC_BLOCK_HELPER
-  endif
-  ifneq ($(shell grep -o "__flow_indr_block_cb_register" $(LINUXSRC)/include/net/flow_offload.h ||	\
-	  grep -o "flow_indr_block_bind_cb_t" $(LINUXSRC)/include/net/flow_offload.h),)
-    DISTRO_CFLAG += -DHAVE_FLOW_INDR_BLOCK_CB
-    ifneq ($(shell grep -A 1 "void flow_indr_dev_unregister" $(LINUXSRC)/include/net/flow_offload.h | grep -o "flow_setup_cb_t \*setup_cb"),)
-      DISTRO_CFLAG += -DHAVE_OLD_FLOW_INDR_DEV_UNRGTR
-    endif
-  endif
-  ifneq ($(shell grep -o "FLOW_ACTION_POLICE" $(LINUXSRC)/include/net/flow_offload.h),)
-    DISTRO_CFLAG += -DHAVE_FLOW_ACTION_POLICE
-  endif
-  ifneq ($(shell grep -o "flow_action_basic_hw_stats_check" $(LINUXSRC)/include/net/flow_offload.h),)
-    DISTRO_CFLAG += -DHAVE_FLOW_ACTION_BASIC_HW_STATS_CHECK
-  endif
-  ifneq ($(shell grep -o "flow_indr_dev_register" $(LINUXSRC)/include/net/flow_offload.h),)
-    DISTRO_CFLAG += -DHAVE_FLOW_INDR_DEV_RGTR
-  endif
-  ifneq ($(shell grep -A 2 "flow_stats_update" $(LINUXSRC)/include/net/flow_offload.h | grep -o drops),)
-    DISTRO_CFLAG += -DHAVE_FLOW_STATS_DROPS
-  endif
-  ifneq ($(shell grep -A 3 "flow_indr_block_bind_cb_t" $(LINUXSRC)/include/net/flow_offload.h | grep -o cleanup),)
-    DISTRO_CFLAG += -DHAVE_FLOW_INDR_BLOCK_CLEANUP
-  endif
-  ifneq ($(shell grep -o "cb_list_head" $(LINUXSRC)/include/net/flow_offload.h),)
-    DISTRO_CFLAG += -DHAVE_FLOW_INDIR_BLK_PROTECTION
-  endif
-endif
-
-ifneq ($(shell grep -s "devlink_ops" $(LINUXSRC)/include/net/devlink.h),)
-  DISTRO_CFLAG += -DHAVE_DEVLINK
-  ifeq ($(shell grep -o "devlink_register(struct devlink \*devlink);" $(LINUXSRC)/include/net/devlink.h),)
-    DISTRO_CFLAG += -DHAVE_DEVLINK_REGISTER_DEV
-  endif
-endif
-
-ifneq ($(shell grep -s -A 7 "devlink_port_attrs" $(LINUXSRC)/include/net/devlink.h | grep -o "netdev_phys_item_id"),)
-  DISTRO_CFLAG += -DHAVE_DEVLINK_PORT_ATTRS
-endif
-
-ifneq ($(shell grep -s -A 1 "devlink_port_attrs_set" $(LINUXSRC)/include/net/devlink.h | grep -o "struct devlink_port_attrs"),)
-  DISTRO_CFLAG += -DHAVE_DEVLINK_PORT_ATTRS_SET_NEW
-endif
-
-ifneq ($(shell grep -s "devlink_param" $(LINUXSRC)/include/net/devlink.h),)
-  DISTRO_CFLAG += -DHAVE_DEVLINK_PARAM
-  ifneq ($(shell grep -s -A 2 "int (\*validate)" $(LINUXSRC)/include/net/devlink.h | grep "struct netlink_ext_ack \*extack"),)
-    DISTRO_CFLAG += -DHAVE_DEVLINK_VALIDATE_NEW
-  endif
-endif
-
-ifneq ($(shell grep -o "ndo_get_port_parent_id" $(LINUXSRC)/include/linux/netdevice.h),)
-  DISTRO_CFLAG += -DHAVE_NDO_GET_PORT_PARENT_ID
-endif
-
-ifneq ($(shell grep -s "switchdev_ops" $(LINUXSRC)/include/net/switchdev.h),)
-  DISTRO_CFLAG += -DHAVE_SWITCHDEV
-endif
-
-ifneq ($(shell grep -o "net_device_ops_extended" $(LINUXSRC)/include/linux/netdevice.h),)
-  ifneq ($(shell grep -o "ndo_xdp_xmit" $(LINUXSRC)/include/linux/netdevice.h),)
-    DISTRO_CFLAG += -DHAVE_EXT_NDO_XDP_XMIT
-  endif
-else ifneq ($(shell grep -o "ndo_xdp" $(LINUXSRC)/include/linux/netdevice.h),)
-  DISTRO_CFLAG += -DHAVE_NDO_XDP
-  ifneq ($(shell grep -o "ndo_bpf" $(LINUXSRC)/include/linux/netdevice.h),)
-    DISTRO_CFLAG += -DHAVE_NDO_BPF
-  endif
-  ifneq ($(shell ls $(LINUXSRC)/include/linux/bpf_trace.h > /dev/null 2>&1 && echo bpf_trace),)
-    DISTRO_CFLAG += -DHAVE_BPF_TRACE
-  endif
-  ifneq ($(shell grep -o "skb_metadata_set" $(LINUXSRC)/include/linux/skbuff.h),)
-    DISTRO_CFLAG += -DHAVE_XDP_DATA_META
-  endif
-  ifneq ($(shell grep -o "void bpf_prog_add" $(LINUXSRC)/include/linux/bpf.h),)
-    DISTRO_CFLAG += -DHAVE_VOID_BPF_PROG_ADD
-  endif
-  ifneq ($(shell grep "void bpf_warn_invalid_xdp_action" $(LINUXSRC)/include/linux/filter.h | grep -o "struct net_device"),)
-    DISTRO_CFLAG += -DHAVE_BPF_WARN_INVALID_XDP_ACTION_EXT
-  endif
-endif
-
-ifneq ($(shell grep -o "udp_tunnel_nic" $(LINUXSRC)/include/linux/netdevice.h),)
-  DISTRO_CFLAG += -DHAVE_UDP_TUNNEL_NIC
 endif
 
 ifneq ($(shell grep -A 2 "process_mad" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h | grep "u32 port_num"),)
@@ -446,6 +308,10 @@ ifneq (,$(shell grep -so "ETHTOOL_LINK_MODE_25000baseCR_Full_BIT" $(LINUXSRC)/in
   DISTRO_CFLAG += -DHAVE_ETHTOOL_GLINKSETTINGS_25G
 endif
 
+ifneq ($(shell grep -o "^struct ethtool_keee" $(LINUXSRC)/include/linux/ethtool.h),)
+  DISTRO_CFLAG += -DHAVE_ETHTOOL_KEEE
+endif
+
 ifneq (,$(shell grep -so "IB_USER_VERBS_EX_CMD_MODIFY_QP" $(OFA_KERNEL_PATH)/include/$(UAPI)/rdma/ib_user_verbs.h))
   DISTRO_CFLAG += -DHAVE_IB_USER_VERBS_EX_CMD_MODIFY_QP
 endif
@@ -472,14 +338,6 @@ endif
 
 ifneq ($(shell grep -A 2 "rdma_addr_find_dmac_by_grh" $(OFA_KERNEL_PATH)/include/rdma/ib_addr.h | grep if_index),)
   DISTRO_CFLAG += -DHAVE_RDMA_ADDR_FIND_DMAC_BY_GRH_V2
-endif
-
-ifneq (,$(shell grep -o "if_list" $(LINUXSRC)/include/net/if_inet6.h))
-  DISTRO_CFLAG += -DHAVE_INET6_IF_LIST
-endif
-
-ifneq ($(shell grep -o "PKT_HASH_TYPE" $(LINUXSRC)/include/linux/skbuff.h),)
-  DISTRO_CFLAG += -DHAVE_SKB_HASH_TYPE
 endif
 
 ifneq ($(shell grep "create_ah" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h -A2 | grep udata > /dev/null 2>&1 && echo create_ah),)
@@ -608,34 +466,6 @@ ifneq ($(shell grep -o "NETDEV_BONDING_FAILOVER" $(LINUXSRC)/include/linux/netde
   endif
 endif
 
-ifneq ($(shell grep -o "netdev_master_upper_dev_get" $(LINUXSRC)/include/linux/netdevice.h),)
-      DISTRO_CFLAG += -DHAVE_NETDEV_MASTER_UPPER_DEV_GET
-endif
-
-ifneq ($(shell grep -o "dev_get_stats64" $(LINUXSRC)/include/linux/netdevice.h),)
-      DISTRO_CFLAG += -DHAVE_DEV_GET_STATS64
-endif
-
-ifneq ($(shell grep -o "ndo_get_stats64" $(LINUXSRC)/include/linux/netdevice.h),)
-  ifeq ($(shell grep -o "net_device_ops_ext" $(LINUXSRC)/include/linux/netdevice.h),)
-    DISTRO_CFLAG += -DNETDEV_GET_STATS64
-  endif
-  ifneq ($(shell grep -o "net_device_ops_extended" $(LINUXSRC)/include/linux/netdevice.h),)
-    DISTRO_CFLAG += -DNETDEV_GET_STATS64
-  endif
-  ifneq ($(shell grep "ndo_get_stats64" $(LINUXSRC)/include/linux/netdevice.h | grep -o "void"),)
-    DISTRO_CFLAG += -DNETDEV_GET_STATS64_VOID
-  endif
-endif
-
-ifneq ($(shell grep -o "ndo_do_ioctl" $(LINUXSRC)/include/linux/netdevice.h),)
-      DISTRO_CFLAG += -DHAVE_NDO_DO_IOCTL
-endif
-
-ifneq ($(shell grep -o "ndo_eth_ioctl" $(LINUXSRC)/include/linux/netdevice.h),)
-      DISTRO_CFLAG += -DHAVE_NDO_ETH_IOCTL
-endif
-
 ifneq ($(BNXT_PEER_MEM_INC),)
       export BNXT_PEER_MEM_INC
       ifneq ($(shell grep -o "ib_umem_get_flags" $(BNXT_PEER_MEM_INC)/peer_umem.h),)
@@ -643,10 +473,6 @@ ifneq ($(BNXT_PEER_MEM_INC),)
       endif
       EXTRA_CFLAGS += -DIB_PEER_MEM_MOD_SUPPORT
       EXTRA_CFLAGS += -I$(BNXT_PEER_MEM_INC)
-endif
-
-ifneq ($(shell ls $(LINUXSRC)/include/net/flow_dissector.h > /dev/null 2>&1 && echo flow),)
-  DISTRO_CFLAG += -DHAVE_FLOW_DISSECTOR
 endif
 
 ifneq ($(shell ls $(LINUXSRC)/include/linux/dim.h > /dev/null 2>&1 && echo dim),)
@@ -892,10 +718,6 @@ ifneq ($(shell grep "smac" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h),)
   DISTRO_CFLAG += -DHAVE_IB_WC_SMAC
 endif
 
-ifneq ($(shell grep -s "METADATA_HW_PORT_MUX" $(LINUXSRC)/include/net/dst_metadata.h),)
-  DISTRO_CFLAG += -DHAVE_METADATA_HW_PORT_MUX
-endif
-
 ifneq ($(shell grep "pci_num_vf" $(LINUXSRC)/include/linux/pci.h),)
   DISTRO_CFLAG += -DHAVE_PCI_NUM_VF
 endif
@@ -918,12 +740,12 @@ ifneq ($(shell ls $(LINUXSRC)/include/linux/auxiliary_bus.h > /dev/null 2>&1 && 
   endif
 endif
 
-ifneq ($(shell grep -so "auxiliary_set_drvdata" $(LINUXSRC)/include/linux/auxiliary_bus.h),)
-  DISTRO_CFLAG += -DHAVE_AUX_SET_DRVDATA
-endif
-
 ifneq ($(shell grep -so "auxiliary_get_drvdata" $(LINUXSRC)/include/linux/auxiliary_bus.h),)
   DISTRO_CFLAG += -DHAVE_AUX_GET_DRVDATA
+endif
+
+ifneq ($(shell grep -sw "(\*remove)"  $(LINUXSRC)/include/linux/auxiliary_bus.h | grep -o "int"),)
+  DISTRO_CFLAG += -DHAVE_AUDEV_REM_RET_INT
 endif
 
 ifneq ($(shell grep -o "struct rdma_stat_desc {" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h),)
@@ -940,6 +762,10 @@ endif
 
 ifneq ($(shell grep -so "addrconf_addr_eui48" $(LINUXSRC)/include/net/addrconf.h),)
   DISTRO_CFLAG += -DHAVE_ADDRCONF_ADDR_EUI48
+endif
+
+ifneq ($(shell grep "IB_ACCESS_RELAXED_ORDERING" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h),)
+  DISTRO_CFLAG += -DHAVE_IB_ACCESS_RELAXED_ORDERING
 endif
 
 KBUILD_EXTRA_SYMBOLS += $(BNXT_EN_INC)/Module.symvers

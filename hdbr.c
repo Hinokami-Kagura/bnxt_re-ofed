@@ -1,6 +1,6 @@
 /* Broadcom NetXtreme-C/E network driver.
  *
- * Copyright (c) 2022-2023 Broadcom Inc.
+ * Copyright (c) 2022-2024 Broadcom Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -142,10 +142,9 @@ static void hdbr_dealloc_page(struct bnxt_re_dev *rdev, struct hdbr_pg *pg, int 
 
 	/* Free page and structure memory in background */
 	wk = kzalloc(sizeof(*wk), GFP_ATOMIC);
-	if (!wk) {
-		dev_err(rdev_to_dev(rdev), "Failed to allocate wq for freeing page!");
+	if (!wk)
 		return;
-	}
+
 	wk->rdev = rdev;
 	wk->pg = pg;
 	wk->size = PAGE_SIZE_4K;
@@ -206,8 +205,9 @@ static void bnxt_re_hdbr_db_unreg(struct bnxt_re_dev *rdev, int group,
 	ktbl_idx = dbinfo->ktbl_idx;
 	dbc = dbinfo->dbc;
 	if (!app || !dbc) {
-		dev_err(rdev_to_dev(rdev), "Invalid unreg db params, app=0x%px, ktbl_idx=%d,"
-			" dbc=0x%px\n", app, ktbl_idx, dbc);
+		dev_err(rdev_to_dev(rdev),
+			"Invalid unreg db params, app=0x%p, ktbl_idx=%d, dbc=0x%p\n",
+			app, ktbl_idx, dbc);
 		return;
 	}
 
@@ -269,7 +269,7 @@ void bnxt_re_hdbr_db_unreg_cq(struct bnxt_re_dev *rdev, struct bnxt_re_cq *cq)
 }
 
 static __le64 *bnxt_re_hdbr_db_reg(struct bnxt_re_dev *rdev, struct bnxt_re_hdbr_app *app,
-				   int group, int *ktbl_idx, u16 pi)
+				   int group, u16 pi, struct bnxt_qplib_db_info *dbinfo)
 {
 	struct hdbr_pg_lst *plst;
 	struct hdbr_pg *pg;
@@ -290,7 +290,7 @@ static __le64 *bnxt_re_hdbr_db_reg(struct bnxt_re_dev *rdev, struct bnxt_re_hdbr
 	list_for_each_entry(pg, &plst->pg_head, pg_node) {
 		if (pg->blk_avail > 0) {
 			dbc = hdbr_claim_slot(pg);
-			*ktbl_idx = pg->ktbl_idx;
+			dbinfo->ktbl_idx = pg->ktbl_idx;
 			plst->blk_avail--;
 			break;
 		}
@@ -316,7 +316,7 @@ int bnxt_re_hdbr_db_reg_srq(struct bnxt_re_dev *rdev, struct bnxt_re_srq *srq,
 		app = container_of(rdev->hdbr_privileged, struct bnxt_re_hdbr_app, lst);
 	}
 
-	dbinfo->dbc = bnxt_re_hdbr_db_reg(rdev, app, DBC_GROUP_SRQ, &dbinfo->ktbl_idx, pi);
+	dbinfo->dbc = bnxt_re_hdbr_db_reg(rdev, app, DBC_GROUP_SRQ, pi, dbinfo);
 	if (!dbinfo->dbc)
 		return -ENOMEM;
 	dbinfo->app = app;
@@ -348,7 +348,7 @@ int bnxt_re_hdbr_db_reg_qp(struct bnxt_re_dev *rdev, struct bnxt_re_qp *qp,
 
 	/* sq */
 	dbinfo = &qp->qplib_qp.sq.dbinfo;
-	dbinfo->dbc = bnxt_re_hdbr_db_reg(rdev, app, DBC_GROUP_SQ, &dbinfo->ktbl_idx, pi);
+	dbinfo->dbc = bnxt_re_hdbr_db_reg(rdev, app, DBC_GROUP_SQ, pi, dbinfo);
 	if (!dbinfo->dbc)
 		return -ENOMEM;
 	dbinfo->app = app;
@@ -366,7 +366,7 @@ int bnxt_re_hdbr_db_reg_qp(struct bnxt_re_dev *rdev, struct bnxt_re_qp *qp,
 
 	/* rq */
 	dbinfo = &qp->qplib_qp.rq.dbinfo;
-	dbinfo->dbc = bnxt_re_hdbr_db_reg(rdev, app, DBC_GROUP_RQ, &dbinfo->ktbl_idx, pi);
+	dbinfo->dbc = bnxt_re_hdbr_db_reg(rdev, app, DBC_GROUP_RQ, pi, dbinfo);
 	if (!dbinfo->dbc) {
 		bnxt_re_hdbr_db_unreg_qp(rdev, qp);
 		return -ENOMEM;
@@ -395,7 +395,7 @@ int bnxt_re_hdbr_db_reg_cq(struct bnxt_re_dev *rdev, struct bnxt_re_cq *cq,
 		app = container_of(rdev->hdbr_privileged, struct bnxt_re_hdbr_app, lst);
 	}
 
-	dbinfo->dbc = bnxt_re_hdbr_db_reg(rdev, app, DBC_GROUP_CQ, &dbinfo->ktbl_idx, pi);
+	dbinfo->dbc = bnxt_re_hdbr_db_reg(rdev, app, DBC_GROUP_CQ, pi, dbinfo);
 	if (!dbinfo->dbc)
 		return -ENOMEM;
 	dbinfo->app = app;
@@ -413,10 +413,9 @@ struct bnxt_re_hdbr_app *bnxt_re_hdbr_alloc_app(struct bnxt_re_dev *rdev, bool u
 	int group;
 
 	app = kzalloc(sizeof(*app), GFP_KERNEL);
-	if (!app) {
-		dev_err(rdev_to_dev(rdev), "hdbr app alloc failed!");
+	if (!app)
 		return NULL;
-	}
+
 	INIT_LIST_HEAD(&app->lst);
 	for (group = DBC_GROUP_SQ; group < DBC_GROUP_MAX; group++) {
 		app->pg_lst[group].group = group;
@@ -541,6 +540,7 @@ static void bnxt_re_hdbr_pages_dump(struct hdbr_pg_lst *plst)
 {
 	struct hdbr_pg *pg;
 	__le64 *dbc_ptr;
+	u64  dbc_val;
 	int i, cnt = 0;
 
 	mutex_lock(&plst->lst_lock);
@@ -561,14 +561,68 @@ static void bnxt_re_hdbr_pages_dump(struct hdbr_pg_lst *plst)
 		for (i = 0; i < 512; i++) {
 			if (i > 0 && i < 511 && !dbc_ptr[i])
 				continue;
-			pr_info("page[%d][%3d] 0x%016llX\n", cnt, i, le64_to_cpu(dbc_ptr[i]));
+			dbc_val = le64_to_cpu(dbc_ptr[i]);
+			pr_info("page[%d][%3d] 0x%016llX : type=%llx "
+				"debug_trace=%d valid=%d path=%llx xID=0x%05llx "
+				"toggle=%llx epoch=%d index=0x%06llx\n",
+				cnt, i, dbc_val,
+				(dbc_val & DBC_DBC64_TYPE_MASK) >> DBC_DBC64_TYPE_SFT,
+				(dbc_val & DBC_DBC64_DEBUG_TRACE) ? 1 : 0,
+				(dbc_val & DBC_DBC64_VALID) ? 1 : 0,
+				(dbc_val & DBC_DBC64_PATH_MASK) >> DBC_DBC64_PATH_SFT,
+				(dbc_val & DBC_DBC64_XID_MASK) >> DBC_DBC64_XID_SFT,
+				(dbc_val & DBC_DBC64_TOGGLE_MASK) >> DBC_DBC64_TOGGLE_SFT,
+				(dbc_val & DBC_DBC64_EPOCH) ? 1 : 0,
+				(dbc_val & DBC_DBC64_INDEX_MASK));
 		}
 		cnt++;
 	}
 	mutex_unlock(&plst->lst_lock);
 }
 
-char *bnxt_re_hdbr_user_dump(struct bnxt_re_dev *rdev, int group)
+/* bnxt_re_hdbr_kaddr_to_dma -	get dma address for given kernel virtual address
+ * @app:         hdbr app instance
+ * @kaddr:       kernel virtual address
+ *
+ * This function will search the page list which was allocated for the given
+ * hdbr app instance.
+ * hdbr_app instance must be a valid instance.
+ * If any page instance in any of the group is matching kaddr,
+ * return associated dma_addr_t.
+ *
+ * Returns: dma address if found or ZERO if not found
+ *
+ */
+dma_addr_t bnxt_re_hdbr_kaddr_to_dma(struct bnxt_re_hdbr_app *app, u64 kaddr)
+{
+	dma_addr_t dma_handle = 0;
+	struct hdbr_pg_lst *plst;
+	struct hdbr_pg *pg;
+	int i;
+
+	for (i = 0; i < DBC_GROUP_MAX; i++) {
+		plst = &app->pg_lst[i];
+
+		mutex_lock(&plst->lst_lock);
+		list_for_each_entry(pg, &plst->pg_head, pg_node) {
+			if (kaddr == (u64)pg->kptr) {
+				pr_debug("kptr        = 0x%016llX\n", (u64)pg->kptr);
+				pr_debug("dma         = 0x%016llX\n", pg->da);
+				dma_handle = pg->da;
+				break;
+			}
+		}
+		mutex_unlock(&plst->lst_lock);
+
+		if (dma_handle)
+			goto exit;
+	}
+
+exit:
+	return dma_handle;
+}
+
+static char *bnxt_re_hdbr_user_dump(struct bnxt_re_dev *rdev, int group)
 {
 	struct list_head *head = &rdev->hdbr_apps;
 	struct bnxt_re_hdbr_app *app;
@@ -598,7 +652,7 @@ char *bnxt_re_hdbr_user_dump(struct bnxt_re_dev *rdev, int group)
 	return buf;
 }
 
-char *bnxt_re_hdbr_driver_dump(char *dev_name, struct list_head *head, int group)
+static char *bnxt_re_hdbr_driver_dump(char *dev_name, struct list_head *head, int group)
 {
 	struct bnxt_re_hdbr_app *app;
 	struct hdbr_pg_lst *plst;

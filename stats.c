@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -31,77 +31,11 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Devesh Sharma <devesh.sharma@broadcom.com>
- *
  * Description: statistics related functions
  */
 
 #include "bnxt_re.h"
 #include "bnxt.h"
-
-int bnxt_re_get_flow_stats_from_service_pf(struct bnxt_re_dev *rdev,
-					   struct bnxt_re_flow_counters *stats,
-					   struct bnxt_qplib_query_stats_info *sinfo)
-{
-	struct hwrm_cfa_flow_stats_output resp = {};
-	struct hwrm_cfa_flow_stats_input req = {};
-	struct bnxt_en_dev *en_dev = rdev->en_dev;
-	struct bnxt_fw_msg fw_msg = {};
-	u16 target_id;
-	int rc = 0;
-
-	/* FIXME Workaround to avoid system hang when this
-	 * thread is competing with device create/destroy
-	 * sequence
-	 */
-	if (!bnxt_re_rtnl_trylock())
-		/* Not querying stats. Return older values */
-		return 0;
-
-	if (sinfo->function_id == 0xFFFFFFFF)
-		target_id = -1;
-	else
-		target_id = sinfo->function_id + 1;
-
-	/* Issue HWRM cmd to read flow counters for CNP tx and rx */
-	bnxt_re_init_hwrm_hdr((void *)&req, HWRM_CFA_FLOW_STATS, target_id);
-	req.num_flows = cpu_to_le16(6);
-	req.flow_handle_0 = cpu_to_le16(CFA_FLOW_INFO_REQ_FLOW_HANDLE_CNP_CNT);
-	req.flow_handle_1 = cpu_to_le16(CFA_FLOW_INFO_REQ_FLOW_HANDLE_CNP_CNT |
-					CFA_FLOW_INFO_REQ_FLOW_HANDLE_DIR_RX);
-	req.flow_handle_2 = cpu_to_le16(CFA_FLOW_INFO_REQ_FLOW_HANDLE_ROCEV1_CNT);
-	req.flow_handle_3 = cpu_to_le16(CFA_FLOW_INFO_REQ_FLOW_HANDLE_ROCEV1_CNT |
-					CFA_FLOW_INFO_REQ_FLOW_HANDLE_DIR_RX);
-	req.flow_handle_4 = cpu_to_le16(CFA_FLOW_INFO_REQ_FLOW_HANDLE_ROCEV2_CNT);
-	req.flow_handle_5 = cpu_to_le16(CFA_FLOW_INFO_REQ_FLOW_HANDLE_ROCEV2_CNT |
-					CFA_FLOW_INFO_REQ_FLOW_HANDLE_DIR_RX);
-	bnxt_re_fill_fw_msg(&fw_msg, &req, sizeof(req), &resp,
-			    sizeof(resp), BNXT_RE_HWRM_CMD_TIMEOUT(rdev));
-	rc = bnxt_send_msg(en_dev, &fw_msg);
-	if (rc) {
-		rtnl_unlock();
-		dev_dbg(rdev_to_dev(rdev),
-			"Failed to get CFA Flow stats : rc = 0x%x", rc);
-		return rc;
-	}
-
-	stats->cnp_stats.cnp_tx_pkts = le64_to_cpu(resp.packet_0);
-	stats->cnp_stats.cnp_tx_bytes = le64_to_cpu(resp.byte_0);
-	stats->cnp_stats.cnp_rx_pkts = le64_to_cpu(resp.packet_1);
-	stats->cnp_stats.cnp_rx_bytes = le64_to_cpu(resp.byte_1);
-
-	stats->ro_stats.tx_pkts = le64_to_cpu(resp.packet_2) +
-		le64_to_cpu(resp.packet_4);
-	stats->ro_stats.tx_bytes = le64_to_cpu(resp.byte_2) +
-		le64_to_cpu(resp.byte_4);
-	stats->ro_stats.rx_pkts = le64_to_cpu(resp.packet_3) +
-		le64_to_cpu(resp.packet_5);
-	stats->ro_stats.rx_bytes = le64_to_cpu(resp.byte_3) +
-		le64_to_cpu(resp.byte_5);
-
-	rtnl_unlock();
-	return 0;
-}
 
 int bnxt_re_get_qos_stats(struct bnxt_re_dev *rdev)
 {
@@ -236,7 +170,7 @@ int bnxt_re_get_qos_stats(struct bnxt_re_dev *rdev)
 		/*
 		 * Calculate the number of cnp packets and use
 		 * the value to calculate the CRC bytes.
-		 * Multply pkts with 4 and add it to total bytes
+		 * Multiply pkts with 4 and add it to total bytes
 		 */
 		pkts = bnxt_re_stat_diff(tmp_counters[0].cnp_tx_pkts,
 					 &cnps->prev[0].cnp_tx_pkts,
@@ -259,7 +193,7 @@ int bnxt_re_get_qos_stats(struct bnxt_re_dev *rdev)
 		/*
 		 * Calculate the number of cnp packets and use
 		 * the value to calculate the CRC bytes.
-		 * Multply pkts with 4 and add it to total bytes
+		 * Multiply pkts with 4 and add it to total bytes
 		 */
 		pkts = bnxt_re_stat_diff(tmp_counters[1].cnp_tx_pkts,
 					 &cnps->prev[1].cnp_tx_pkts,
@@ -396,46 +330,46 @@ done:
 
 static void bnxt_re_copy_rstat(struct bnxt_re_rdata_counters *d,
 			       struct ctx_hw_stats_ext *s,
-			       bool is_thor)
+			       bool is_p5_p7)
 {
-	d->tx_ucast_pkts = le64_to_cpu(s->tx_ucast_pkts);
-	d->tx_mcast_pkts = le64_to_cpu(s->tx_mcast_pkts);
-	d->tx_bcast_pkts = le64_to_cpu(s->tx_bcast_pkts);
-	d->tx_discard_pkts = le64_to_cpu(s->tx_discard_pkts);
-	d->tx_error_pkts = le64_to_cpu(s->tx_error_pkts);
-	d->tx_ucast_bytes = le64_to_cpu(s->tx_ucast_bytes);
+	d->tx_ucast_pkts = BNXT_RE_RDATA_STAT(s->tx_ucast_pkts, d->tx_ucast_pkts);
+	d->tx_mcast_pkts = BNXT_RE_RDATA_STAT(s->tx_mcast_pkts, d->tx_mcast_pkts);
+	d->tx_bcast_pkts = BNXT_RE_RDATA_STAT(s->tx_bcast_pkts, d->tx_bcast_pkts);
+	d->tx_discard_pkts = BNXT_RE_RDATA_STAT(s->tx_discard_pkts, d->tx_discard_pkts);
+	d->tx_error_pkts = BNXT_RE_RDATA_STAT(s->tx_error_pkts, d->tx_error_pkts);
+	d->tx_ucast_bytes = BNXT_RE_RDATA_STAT(s->tx_ucast_bytes, d->tx_ucast_bytes);
 	/* Add four bytes of CRC bytes per packet */
 	d->tx_ucast_bytes +=  d->tx_ucast_pkts * 4;
-	d->tx_mcast_bytes = le64_to_cpu(s->tx_mcast_bytes);
-	d->tx_bcast_bytes = le64_to_cpu(s->tx_bcast_bytes);
-	d->rx_ucast_pkts = le64_to_cpu(s->rx_ucast_pkts);
-	d->rx_mcast_pkts = le64_to_cpu(s->rx_mcast_pkts);
-	d->rx_bcast_pkts = le64_to_cpu(s->rx_bcast_pkts);
-	d->rx_discard_pkts = le64_to_cpu(s->rx_discard_pkts);
-	d->rx_error_pkts = le64_to_cpu(s->rx_error_pkts);
-	d->rx_ucast_bytes = le64_to_cpu(s->rx_ucast_bytes);
-	d->rx_mcast_bytes = le64_to_cpu(s->rx_mcast_bytes);
-	d->rx_bcast_bytes = le64_to_cpu(s->rx_bcast_bytes);
-	if (is_thor) {
-		d->rx_agg_pkts = le64_to_cpu(s->rx_tpa_pkt);
-		d->rx_agg_bytes = le64_to_cpu(s->rx_tpa_bytes);
-		d->rx_agg_events = le64_to_cpu(s->rx_tpa_events);
-		d->rx_agg_aborts = le64_to_cpu(s->rx_tpa_errors);
+	d->tx_mcast_bytes = BNXT_RE_RDATA_STAT(s->tx_mcast_bytes, d->tx_mcast_bytes);
+	d->tx_bcast_bytes = BNXT_RE_RDATA_STAT(s->tx_bcast_bytes, d->tx_bcast_bytes);
+	d->rx_ucast_pkts = BNXT_RE_RDATA_STAT(s->rx_ucast_pkts, d->rx_ucast_pkts);
+	d->rx_mcast_pkts = BNXT_RE_RDATA_STAT(s->rx_mcast_pkts, d->rx_mcast_pkts);
+	d->rx_bcast_pkts = BNXT_RE_RDATA_STAT(s->rx_bcast_pkts, d->rx_bcast_pkts);
+	d->rx_discard_pkts = BNXT_RE_RDATA_STAT(s->rx_discard_pkts, d->rx_discard_pkts);
+	d->rx_error_pkts = BNXT_RE_RDATA_STAT(s->rx_error_pkts, d->rx_error_pkts);
+	d->rx_ucast_bytes = BNXT_RE_RDATA_STAT(s->rx_ucast_bytes, d->rx_ucast_bytes);
+	d->rx_mcast_bytes = BNXT_RE_RDATA_STAT(s->rx_mcast_bytes, d->rx_mcast_bytes);
+	d->rx_bcast_bytes = BNXT_RE_RDATA_STAT(s->rx_bcast_bytes, d->rx_bcast_bytes);
+	if (is_p5_p7) {
+		d->rx_agg_pkts = BNXT_RE_RDATA_STAT(s->rx_tpa_pkt, d->rx_agg_pkts);
+		d->rx_agg_bytes = BNXT_RE_RDATA_STAT(s->rx_tpa_bytes, d->rx_agg_bytes);
+		d->rx_agg_events = BNXT_RE_RDATA_STAT(s->rx_tpa_events, d->rx_agg_events);
+		d->rx_agg_aborts = BNXT_RE_RDATA_STAT(s->rx_tpa_errors, d->rx_agg_aborts);
 	}
 }
 
 static void bnxt_re_get_roce_data_stats(struct bnxt_re_dev *rdev)
 {
-	bool is_thor = _is_chip_gen_p5_p7(rdev->chip_ctx);
+	bool is_p5_p7 = _is_chip_gen_p5_p7(rdev->chip_ctx);
 	struct bnxt_re_rdata_counters *rstat;
 
 	rstat = &rdev->stats.dstat.rstat[0];
-	bnxt_re_copy_rstat(rstat, rdev->qplib_res.hctx->stats.dma, is_thor);
+	bnxt_re_copy_rstat(rstat, rdev->qplib_res.hctx->stats.dma, is_p5_p7);
 
 	/* Query second port if LAG is enabled */
 	if (rdev->binfo) {
 		rstat = &rdev->stats.dstat.rstat[1];
-		bnxt_re_copy_rstat(rstat, rdev->qplib_res.hctx->stats2.dma, is_thor);
+		bnxt_re_copy_rstat(rstat, rdev->qplib_res.hctx->stats2.dma, is_p5_p7);
 	}
 }
 

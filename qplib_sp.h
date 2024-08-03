@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -31,8 +31,6 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
- *
  * Description: Slow Path Operators (header)
  */
 
@@ -42,34 +40,56 @@
 #define BNXT_QPLIB_RESERVED_QP_WRS	128
 
 /* DCN query */
-#define QUERY_DCN_QT_ACT_CR_MASK	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_CR_MASK
-#define QUERY_DCN_QT_ACT_CR_SFT		CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_CR_SFT
-#define QUERY_DCN_QT_ACT_INC_CNP	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_INC_CNP
-#define QUERY_DCN_QT_ACT_UPD_IMM	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_UPD_IMM
-#define QUERY_DCN_QT_ACT_TR_MASK	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_TR_MASK
-#define QUERY_DCN_QT_ACT_TR_SFT		CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_TR_SFT
+#define QUERY_DCN_QT_ACT_CR_MASK	\
+	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_CR_MASK
+#define QUERY_DCN_QT_ACT_CR_SFT		\
+	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_CR_SFT
+#define QUERY_DCN_QT_ACT_INC_CNP	\
+	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_INC_CNP
+#define QUERY_DCN_QT_ACT_UPD_IMM	\
+	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_UPD_IMM
+#define QUERY_DCN_QT_ACT_TR_MASK	\
+	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_TR_MASK
+#define QUERY_DCN_QT_ACT_TR_SFT		\
+	CREQ_QUERY_ROCE_CC_GEN2_RESP_SB_TLV_DCN_QLEVEL_TBL_ACT_TR_SFT
 #define DCN_GET_CR(act) (((act) & QUERY_DCN_QT_ACT_CR_MASK) >> QUERY_DCN_QT_ACT_CR_SFT)
 #define DCN_GET_TR(act) (((act) & QUERY_DCN_QT_ACT_TR_MASK) >> QUERY_DCN_QT_ACT_TR_SFT)
 #define DCN_GET_INC_CNP(act) (((act) & QUERY_DCN_QT_ACT_INC_CNP) ? 1 : 0)
 #define DCN_GET_UPD_IMM(act) (((act) & QUERY_DCN_QT_ACT_UPD_IMM) ? 1 : 0)
 
 /* DCN modify */
-#define MODIFY_MASK_DCN_QLEVEL_TBL_IDX     CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_IDX
-#define MODIFY_MASK_DCN_QLEVEL_TBL_THR     CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_THR
-#define MODIFY_MASK_DCN_QLEVEL_TBL_CR      CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_CR
-#define MODIFY_MASK_DCN_QLEVEL_TBL_INC_CNP CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_INC_CNP
-#define MODIFY_MASK_DCN_QLEVEL_TBL_UPD_IMM CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_UPD_IMM
-#define MODIFY_MASK_DCN_QLEVEL_TBL_TR      CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_TR
-#define MODIFY_DCN_QT_ACT_CR_MASK	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_CR_MASK
-#define MODIFY_DCN_QT_ACT_CR_SFT	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_CR_SFT
-#define MODIFY_DCN_QT_ACT_INC_CNP	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_INC_CNP
-#define MODIFY_DCN_QT_ACT_UPD_IMM	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_UPD_IMM
-#define MODIFY_DCN_QT_ACT_TR_MASK	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_TR_MASK
-#define MODIFY_DCN_QT_ACT_TR_SFT	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_TR_SFT
-#define DCN_SET_CR(act, cr) (((*(act)) & ~MODIFY_DCN_QT_ACT_CR_MASK) | ((cr) << MODIFY_DCN_QT_ACT_CR_SFT))
-#define DCN_SET_TR(act, tr) (((*(act)) & ~MODIFY_DCN_QT_ACT_TR_MASK) | ((tr) << MODIFY_DCN_QT_ACT_TR_SFT))
-#define DCN_SET_INC_CNP(act, ic) ((ic) ? ((*(act)) | MODIFY_DCN_QT_ACT_INC_CNP) : ((*(act)) & ~MODIFY_DCN_QT_ACT_INC_CNP))
-#define DCN_SET_UPD_IMM(act, ui) ((ui) ? ((*(act)) | MODIFY_DCN_QT_ACT_UPD_IMM) : ((*(act)) & ~MODIFY_DCN_QT_ACT_UPD_IMM))
+#define MODIFY_MASK_DCN_QLEVEL_TBL_IDX		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_IDX
+#define MODIFY_MASK_DCN_QLEVEL_TBL_THR		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_THR
+#define MODIFY_MASK_DCN_QLEVEL_TBL_CR		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_CR
+#define MODIFY_MASK_DCN_QLEVEL_TBL_INC_CNP	\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_INC_CNP
+#define MODIFY_MASK_DCN_QLEVEL_TBL_UPD_IMM	\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_UPD_IMM
+#define MODIFY_MASK_DCN_QLEVEL_TBL_TR		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_MODIFY_MASK_DCN_QLEVEL_TBL_TR
+#define MODIFY_DCN_QT_ACT_CR_MASK		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_CR_MASK
+#define MODIFY_DCN_QT_ACT_CR_SFT		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_CR_SFT
+#define MODIFY_DCN_QT_ACT_INC_CNP		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_INC_CNP
+#define MODIFY_DCN_QT_ACT_UPD_IMM		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_UPD_IMM
+#define MODIFY_DCN_QT_ACT_TR_MASK		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_TR_MASK
+#define MODIFY_DCN_QT_ACT_TR_SFT		\
+	CMDQ_MODIFY_ROCE_CC_GEN2_TLV_DCN_QLEVEL_TBL_ACT_TR_SFT
+#define DCN_SET_CR(act, cr)		\
+	(((*(act)) & ~MODIFY_DCN_QT_ACT_CR_MASK) | ((cr) << MODIFY_DCN_QT_ACT_CR_SFT))
+#define DCN_SET_TR(act, tr)		\
+	(((*(act)) & ~MODIFY_DCN_QT_ACT_TR_MASK) | ((tr) << MODIFY_DCN_QT_ACT_TR_SFT))
+#define DCN_SET_INC_CNP(act, ic)	\
+	((ic) ? ((*(act)) | MODIFY_DCN_QT_ACT_INC_CNP) : ((*(act)) & ~MODIFY_DCN_QT_ACT_INC_CNP))
+#define DCN_SET_UPD_IMM(act, ui)	\
+	((ui) ? ((*(act)) | MODIFY_DCN_QT_ACT_UPD_IMM) : ((*(act)) & ~MODIFY_DCN_QT_ACT_UPD_IMM))
 
 #define BNXT_RE_DCN_ENABLED(res) \
 	(_is_chip_p7((res)->cctx) && \
@@ -86,11 +106,12 @@ struct bnxt_qplib_dev_attr {
 #define BNXT_QPLIB_MAX_OUT_RD_ATOM	126
 	u32				max_qp_rd_atom;
 	u32				max_qp_init_rd_atom;
-	u32				max_qp_wqes;
+	u32				max_sq_wqes;
+	u32				max_rq_wqes;
 	u32				max_qp_sges;
 	u32				max_cq;
-	/* HW supports only 8K entries in PBL.
-	 * So max CQEs that can be supported per CQ is 1M.
+	/* HW supports only 8K entries in PBL for Thor and Wh+.
+	 * So max CQEs that can be supported per CQ is 1M for Thor and Wh+.
 	 */
 #define BNXT_QPLIB_MAX_CQ_WQES		0xfffff
 	u32				max_cq_wqes;
@@ -112,6 +133,7 @@ struct bnxt_qplib_dev_attr {
 	u8				tqm_alloc_reqs[MAX_TQM_ALLOC_REQ];
 	u8				is_atomic;
 	u8				dev_cap_ext_flags;
+	u16				dev_cap_ext_flags2;
 	u16				dev_cap_flags;
 	u64				page_size_cap;
 	u32				max_dpi;
@@ -135,7 +157,8 @@ struct bnxt_qplib_ah {
 	struct bnxt_qplib_pd		*pd;
 	u32				id;
 	u8				sgid_index;
-	u8				host_sgid_index; /* For Query AH if the hw table and SW table are differnt */
+	/* For Query AH if the hw table and SW table are different */
+	u8				host_sgid_index;
 	u8				traffic_class;
 	u32				flow_label;
 	u8				hop_limit;
@@ -167,6 +190,7 @@ struct bnxt_qplib_mrinfo {
 	struct bnxt_qplib_sg_info	sg;
 	u64				*ptes;
 	bool				is_dma;
+	bool				request_relax_order;
 };
 
 struct bnxt_qplib_frpl {
@@ -441,6 +465,8 @@ int bnxt_qplib_get_roce_error_stats(struct bnxt_qplib_rcfw *rcfw,
 int bnxt_qplib_qext_stat(struct bnxt_qplib_rcfw *rcfw, u32 fid,
 			 struct bnxt_qplib_ext_stat *estat,
 			 struct bnxt_qplib_query_stats_info *sinfo);
+int bnxt_qplib_read_context(struct bnxt_qplib_rcfw *rcfw, u8 type, u32 xid,
+			    u32 resp_size, void *resp_va);
 
 /* In variable wqe mode, sq_size is hwq.depth. FW is capping sq_size at 65535.
  * In order to ensure hwq.depth <= 65535 after align up with 256, we need to
@@ -449,5 +475,6 @@ int bnxt_qplib_qext_stat(struct bnxt_qplib_rcfw *rcfw, u32 fid,
 #define BNXT_VAR_MAX_WQE       4352
 #define BNXT_VAR_MAX_SLOT_ALIGN	256
 #define BNXT_VAR_MAX_SGE	13
+#define BNXT_RE_MAX_RQ_WQES	65536
 
 #endif

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -31,8 +31,6 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
- *
  * Description: RDMA Controller HW interface (header)
  */
 
@@ -54,7 +52,7 @@
 #define RCFW_DBR_BASE_PAGE_SHIFT	12
 #define RCFW_MAX_LATENCY_SEC_SLAB_INDEX	128
 #define RCFW_MAX_LATENCY_MSEC_SLAB_INDEX	3000
-#define RCFW_MAX_STAT_INDEX	0xFFFF
+#define RCFW_MAX_STAT_INDEX	0x3FFFF
 #define	RCFW_FW_STALL_MAX_TIMEOUT	40
 
 extern unsigned int cmdq_shadow_qd;
@@ -234,6 +232,21 @@ struct bnxt_qplib_rcfw {
 	u32	mr_create_stats_id;
 	u32	mr_destroy_stats_id;
 	bool	sp_perf_stats_enabled;
+
+#define CTXM_DATA_INDEX_MAX	1024
+	u32 qp_ctxm_data_index;
+	u32 cq_ctxm_data_index;
+	u32 mrw_ctxm_data_index;
+	u32 srq_ctxm_data_index;
+	u32 qp_ctxm_size;
+	u32 cq_ctxm_size;
+	u32 mrw_ctxm_size;
+	u32 srq_ctxm_size;
+	void *qp_ctxm_data;
+	void *cq_ctxm_data;
+	void *mrw_ctxm_data;
+	void *srq_ctxm_data;
+
 	/* odd place to have following members. */
 	bool init_oos_stats;
 	/* cached from chip cctx for quick reference in slow path */

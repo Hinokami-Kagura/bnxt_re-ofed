@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -31,7 +31,6 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- *
  * Description: defines data-structure for configfs interface
  */
 #ifndef __CONFIGFS_H__
@@ -54,7 +53,7 @@
 #include "qplib_rcfw.h"
 #include "bnxt_re.h"
 
-#define BNXT_RE_MAX_CONFIGFS_ENTRIES 3
+#define BNXT_RE_MAX_CONFIGFS_ENTRIES 4
 #define BNXT_DBR_DROP_MIN_TIMEOUT	1  	/* 1 ms */
 #define BNXT_DBR_DROP_MAX_TIMEOUT 	1000	/* 1000 ms */
 
@@ -65,18 +64,11 @@ enum bnxt_re_configfs_cmd {
 	BNXT_RE_MODIFY_CC = 0x01,
 };
 
-struct bnxt_re_cc_group;
 struct bnxt_re_port_group;
 struct bnxt_re_dev_group;
 
-struct bnxt_re_cc_group
+struct bnxt_re_cfg_group
 {
-	struct bnxt_re_dev *rdev;
-	struct bnxt_re_port_group *portgrp;
-	struct config_group group;
-};
-
-struct bnxt_re_tunable_group {
 	struct bnxt_re_dev *rdev;
 	struct bnxt_re_port_group *portgrp;
 	struct config_group group;
@@ -86,8 +78,11 @@ struct bnxt_re_port_group
 {
 	unsigned int port_num;
 	struct bnxt_re_dev_group *devgrp;
-	struct bnxt_re_cc_group *ccgrp;
-	struct bnxt_re_tunable_group *tungrp;
+	struct bnxt_re_cfg_group *ccgrp;
+	struct bnxt_re_cfg_group *tungrp;
+#if defined(CONFIGFS_BIN_ATTR)
+	struct bnxt_re_cfg_group *udccgrp;
+#endif
 	struct config_group nportgrp;
 #ifndef HAVE_CFGFS_ADD_DEF_GRP
 	struct config_group *default_grp[BNXT_RE_MAX_CONFIGFS_ENTRIES];
@@ -107,6 +102,9 @@ struct bnxt_re_dev_group
 	int nports;
 };
 
+int bnxt_re_get_print_dscp_pri_mapping(struct bnxt_re_dev *rdev,
+				       char *buf,
+				       struct bnxt_qplib_cc_param *ccparam);
 int bnxt_re_configfs_init(void);
 void bnxt_re_configfs_exit(void);
 #endif

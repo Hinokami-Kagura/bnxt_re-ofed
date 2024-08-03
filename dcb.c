@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2022, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -42,6 +42,7 @@
 
 #include "bnxt_re.h"
 #include "qplib_sp.h"
+#include "dcb.h"
 
 #ifdef CONFIG_BNXT_DCB
 u8 bnxt_re_get_priority_mask(struct bnxt_re_dev *rdev, u8 selector)
@@ -160,6 +161,7 @@ void bnxt_re_clear_dcb(struct bnxt_re_dev *rdev,
 
 	if (dev->dcbnl_ops->ieee_setets) {
 		ets.tc_tx_bw[tc_rec->tc_roce] = 0;
+		ets.tc_tx_bw[0] = BNXT_RE_MAX_L2_BW;
 		ets.tc_tsa[tc_rec->tc_roce] = IEEE_8021QAZ_TSA_STRICT;
 		ets.prio_tc[roce_prio] = 0;
 		if (is_qport_service_type_supported(rdev))
@@ -190,15 +192,6 @@ int bnxt_re_setup_dcb(struct bnxt_re_dev *rdev,
 		dev_err(rdev_to_dev(rdev), "Failed to query port config rc:%d",
 			rc);
 		return rc;
-	}
-
-	if (dev->dcbnl_ops->ieee_getets) {
-		rc = dev->dcbnl_ops->ieee_getets(dev, &ets);
-		if (rc) {
-			dev_err(rdev_to_dev(rdev), "Failed to getets rc:%d",
-				rc);
-			return rc;
-		}
 	}
 
 	if (dev->dcbnl_ops->ieee_getpfc) {

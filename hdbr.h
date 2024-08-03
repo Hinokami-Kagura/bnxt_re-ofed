@@ -1,6 +1,6 @@
 /* Broadcom NetXtreme-C/E network driver.
  *
- * Copyright (c) 2022-2023 Broadcom Inc.
+ * Copyright (c) 2022-2024 Broadcom Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -85,4 +85,5 @@ int bnxt_re_hdbr_db_reg_cq(struct bnxt_re_dev *rdev, struct bnxt_re_cq *cq,
 			   struct bnxt_re_cq_req *ureq);
 char *bnxt_re_hdbr_dump(struct bnxt_re_dev *rdev, int group, bool user);
 
+dma_addr_t bnxt_re_hdbr_kaddr_to_dma(struct bnxt_re_hdbr_app *app, u64 kaddr);
 #endif

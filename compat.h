@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2022, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,8 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
  *
  * Description: Compat file for compilation
  */
@@ -69,37 +67,6 @@ struct bnxt_re_dev;
 /* Defined in include/linux/kconfig.h */
 #ifndef IS_ENABLED
 #define IS_ENABLED(option)	defined(option)
-#endif
-
-#if !IS_ENABLED(CONFIG_NET_DEVLINK)
-#undef HAVE_DEVLINK
-#endif
-
-#ifndef HAVE_DEVLINK
-#undef HAVE_DEVLINK_INFO
-#undef HAVE_DEVLINK_PARAM
-#undef HAVE_NDO_DEVLINK_PORT
-#undef HAVE_DEVLINK_FLASH_UPDATE
-#undef HAVE_DEVLINK_HEALTH_REPORT
-#undef HAVE_DEVLINK_RELOAD_ACTION
-#endif
-
-/* Reconcile all dependencies for VF reps:
- * SRIOV, Devlink, Switchdev and HW port info in metadata_dst
- */
-#if defined(CONFIG_BNXT_SRIOV) && defined(HAVE_DEVLINK) && \
-	defined(CONFIG_NET_SWITCHDEV) && defined(HAVE_METADATA_HW_PORT_MUX) && \
-	(LINUX_VERSION_CODE >= 0x030a00)
-#define CONFIG_VF_REPS		1
-#endif
-/* DEVLINK code has dependencies on VF reps */
-#ifdef HAVE_DEVLINK_PARAM
-#define CONFIG_VF_REPS		1
-#endif
-#ifdef CONFIG_VF_REPS
-#ifndef SWITCHDEV_SET_OPS
-#define SWITCHDEV_SET_OPS(netdev, ops) ((netdev)->switchdev_ops = (ops))
-#endif
 #endif
 
 #if !defined(CONFIG_DCB)
@@ -205,6 +172,10 @@ struct ethtool_eee {
 };
 #endif
 
+#ifndef HAVE_ETHTOOL_KEEE
+#define ethtool_keee ethtool_eee
+#endif
+
 #if !defined(NETDEV_RX_FLOW_STEER) || !defined(HAVE_FLOW_KEYS) || (LINUX_VERSION_CODE < 0x030300)
 #undef CONFIG_RFS_ACCEL
 #endif
@@ -232,15 +203,6 @@ int bnxt_re_register_netdevice_notifier(struct notifier_block *nb);
 int bnxt_re_unregister_netdevice_notifier(struct notifier_block *nb);
 struct bnxt_qplib_swqe;
 void bnxt_re_set_fence_flag(struct ib_send_wr *wr, struct bnxt_qplib_swqe *wqe);
-
-#ifndef HAVE_SKB_HASH_TYPE
-enum pkt_hash_types {
-	PKT_HASH_TYPE_NONE,
-	PKT_HASH_TYPE_L2,
-	PKT_HASH_TYPE_L3,
-	PKT_HASH_TYPE_L4,
-};
-#endif
 
 #ifndef HAVE_ETHER_ADDR_COPY
 static inline void ether_addr_copy(u8 *dst, const u8 *src)
@@ -314,8 +276,6 @@ int __bnxt_re_set_vma_data(void *bnxt_re_uctx,
 int remap_pfn_compat(struct ib_ucontext *ib_uctx,
 		     struct vm_area_struct *vma,
 		     u64 pfn);
-
-void bnxt_re_set_max_gid(u16 *max_sgid);
 
 #if defined(RDMA_CORE_CAP_PROT_ROCE_UDP_ENCAP) || defined(ENABLE_ROCEV2_QP1)
 int bnxt_re_get_cached_gid(struct ib_device *dev, u8 port_num, int index,
@@ -439,6 +399,12 @@ typedef int DESTROY_SRQ_RET;
 typedef void DESTROY_SRQ_RET;
 #endif
 
+#ifdef HAVE_AUDEV_REM_RET_INT
+typedef int AUDEV_REM_RET;
+#else
+typedef void AUDEV_REM_RET;
+#endif
+
 #ifdef HAVE_ALLOC_MW_RET_INT
 typedef int ALLOC_MW_RET;
 #else
@@ -526,14 +492,9 @@ enum ib_port_phys_state {
 #endif
 
 #ifdef HAVE_IB_GET_DEV_FW_STR
-#ifdef IB_GET_DEV_FW_STR_HAS_STRLEN
-#define bnxt_re_compat_qfwstr(void)			\
-	bnxt_re_query_fw_str(struct ib_device *ibdev,	\
-			     char *str, size_t str_len)
-#else
-#define bnxt_re_compat_qfwstr(void)			\
-	bnxt_re_query_fw_str(struct ib_device *ibdev,	\
-			     char *str)
+#ifndef IB_GET_DEV_FW_STR_HAS_STRLEN
+#define bnxt_re_query_fw_str(ibdev, str, str_len)	\
+	bnxt_re_query_fw_str(ibdev, str)
 #endif
 #endif
 
@@ -569,33 +530,6 @@ static inline void compat_tasklet_init(struct tasklet_struct *t,
 #endif
 #endif
 
-#if !defined(HAVE_FLOW_DISSECTOR)
-struct bnxt_compat_key_ports {
-	__be16 src;
-	__be16 dst;
-};
-
-struct bnxt_compat_key_ipv4 {
-	__be32 src;
-	__be32 dst;
-};
-
-struct bnxt_compat_key_ipv6 {
-	struct in6_addr src;
-	struct in6_addr dst;
-};
-
-struct bnxt_compat_key_addrs {
-	union {
-		struct bnxt_compat_key_ipv4 v4addrs;
-		struct bnxt_compat_key_ipv6 v6addrs;
-	};
-};
-
-#define flow_dissector_key_ports bnxt_compat_key_ports
-#define flow_dissector_key_addrs bnxt_compat_key_addrs
-#endif	/* HAVE_FLOW_DISSECTOR */
-
 #ifndef HAVE_PCI_NUM_VF
 static inline int pci_num_vf(struct pci_dev *dev)
 {
@@ -618,13 +552,6 @@ static inline int pci_num_vf(struct pci_dev *dev)
 	__struct_group(/* no tag */, NAME, ATTRS, MEMBERS)
 #endif /* struct_group_attr */
 
-struct bnxt_compat_dma_pool {
-	struct dma_pool *pool;
-	size_t size;
-};
-
-#define dma_pool bnxt_compat_dma_pool
-
 #ifndef HAVE_IB_POLL_UNBOUND_WORKQUEUE
 #define IB_POLL_UNBOUND_WORKQUEUE       IB_POLL_WORKQUEUE
 #endif
@@ -645,6 +572,10 @@ static inline void addrconf_addr_eui48(u8 *eui, const char *const addr)
 	memcpy(eui + 5, addr + 3, 3);
 	eui[0] ^= 2;
 }
+#endif
+
+#ifndef __counted_by
+#define __counted_by(member)
 #endif
 
 #endif /* __BNXT_RE_COMPAT_H__ */

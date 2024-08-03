@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -30,8 +30,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
  *
  * Description: RDMA Controller HW interface
  */
@@ -537,8 +535,8 @@ static  void __destroy_timedout_ah(struct bnxt_qplib_rcfw *rcfw,
  * 0 if command completed by firmware.
  * Non zero if the command is not completed by firmware.
  */
-int __bnxt_qplib_rcfw_send_message(struct bnxt_qplib_rcfw *rcfw,
-				   struct bnxt_qplib_cmdqmsg *msg)
+static int __bnxt_qplib_rcfw_send_message(struct bnxt_qplib_rcfw *rcfw,
+					  struct bnxt_qplib_cmdqmsg *msg)
 {
 	struct bnxt_qplib_crsqe *crsqe;
 	struct creq_qp_event *event;
@@ -589,15 +587,7 @@ int __bnxt_qplib_rcfw_send_message(struct bnxt_qplib_rcfw *rcfw,
 		/* failed with status */
 		dev_err(&rcfw->pdev->dev, "QPLIB: cmdq[%#x]=%#x status %d",
 			cookie, opcode, event->status);
-		rc = -EFAULT;
-		/*
-		 * Workaround to avoid errors in the stack during bond
-		 * creation and deletion.
-		 * Disable error returned for  ADD_GID/DEL_GID
-		 */
-		if (opcode == CMDQ_BASE_OPCODE_ADD_GID ||
-		    opcode == CMDQ_BASE_OPCODE_DELETE_GID)
-			rc = 0;
+		rc = -EIO;
 	}
 
 	return rc;
@@ -987,19 +977,13 @@ int bnxt_qplib_init_rcfw(struct bnxt_qplib_rcfw *rcfw, int is_virtfn)
 	struct bnxt_qplib_ctx *hctx;
 	struct bnxt_qplib_res *res;
 	struct bnxt_qplib_hwq *hwq;
-	u8 cmd_size;
 	int rc;
 
 	res = rcfw->res;
 	cctx = res->cctx;
 	hctx = res->hctx;
-
-	cmd_size = sizeof(req);
-	if (!_is_drv_ver_reg_supported(res->dattr->dev_cap_ext_flags))
-		cmd_size -= BNXT_RE_INIT_FW_DRV_VER_SUPPORT_CMD_SIZE;
-
 	bnxt_qplib_rcfw_cmd_prep(&req, CMDQ_BASE_OPCODE_INITIALIZE_FW,
-				 cmd_size);
+				 sizeof(req));
 	/* Supply (log-base-2-of-host-page-size - base-page-shift)
 	 * to bono to adjust the doorbell page sizes.
 	 */
@@ -1072,9 +1056,13 @@ skip_ctx_setup:
 
 	if (res->en_dev->flags & BNXT_EN_FLAG_ROCE_VF_RES_MGMT)
 		req.flags |= CMDQ_INITIALIZE_FW_FLAGS_L2_VF_RESOURCE_MGMT;
+
+	if (_is_optimize_modify_qp_supported(res->dattr->dev_cap_ext_flags2))
+		req.flags |= CMDQ_INITIALIZE_FW_FLAGS_OPTIMIZE_MODIFY_QP_SUPPORTED;
+
 	req.stat_ctx_id = cpu_to_le32(hctx->stats.fw_id);
 	bnxt_qplib_fill_cmdqmsg(&msg, &req, &resp, NULL,
-				cmd_size, sizeof(resp), 0);
+				sizeof(req), sizeof(resp), 0);
 	rc = bnxt_qplib_rcfw_send_message(rcfw, &msg);
 	if (rc)
 		return rc;
@@ -1104,6 +1092,11 @@ void bnxt_qplib_free_rcfw_channel(struct bnxt_qplib_res *res)
 	kfree(rcfw->crsqe_tbl);
 	rcfw->crsqe_tbl = NULL;
 
+	vfree(rcfw->qp_ctxm_data);
+	vfree(rcfw->cq_ctxm_data);
+	vfree(rcfw->mrw_ctxm_data);
+	vfree(rcfw->srq_ctxm_data);
+
 	bnxt_qplib_free_hwq(res, &rcfw->cmdq.hwq);
 	bnxt_qplib_free_hwq(res, &rcfw->creq.hwq);
 	rcfw->pdev = NULL;
@@ -1116,6 +1109,7 @@ int bnxt_qplib_alloc_rcfw_channel(struct bnxt_qplib_res *res)
 	struct bnxt_qplib_sg_info sginfo = {};
 	struct bnxt_qplib_cmdq_ctx *cmdq;
 	struct bnxt_qplib_creq_ctx *creq;
+	int ctx_size;
 
 	rcfw->pdev = res->pdev;
 	rcfw->res = res;
@@ -1174,6 +1168,32 @@ int bnxt_qplib_alloc_rcfw_channel(struct bnxt_qplib_res *res)
 	    rcfw->qp_modify_stats)
 		rcfw->sp_perf_stats_enabled = true;
 
+	if (_is_chip_gen_p5_p7(res->cctx)) {
+		ctx_size = _is_chip_p7(res->cctx) ?
+				  BNXT_RE_CONTEXT_TYPE_QPC_SIZE_P7 :
+				  BNXT_RE_CONTEXT_TYPE_QPC_SIZE_P5;
+		rcfw->qp_ctxm_data = vzalloc(ctx_size * CTXM_DATA_INDEX_MAX);
+		rcfw->qp_ctxm_size = ctx_size;
+
+		ctx_size = _is_chip_p7(res->cctx) ?
+				  BNXT_RE_CONTEXT_TYPE_CQ_SIZE_P7 :
+				  BNXT_RE_CONTEXT_TYPE_CQ_SIZE_P5;
+		rcfw->cq_ctxm_data = vzalloc(ctx_size * CTXM_DATA_INDEX_MAX);
+		rcfw->cq_ctxm_size = ctx_size;
+
+		ctx_size = _is_chip_p7(res->cctx) ?
+				  BNXT_RE_CONTEXT_TYPE_MRW_SIZE_P7 :
+				  BNXT_RE_CONTEXT_TYPE_MRW_SIZE_P5;
+		rcfw->mrw_ctxm_data = vzalloc(ctx_size * CTXM_DATA_INDEX_MAX);
+		rcfw->mrw_ctxm_size = ctx_size;
+
+		ctx_size = _is_chip_p7(res->cctx) ?
+				  BNXT_RE_CONTEXT_TYPE_SRQ_SIZE_P7 :
+				  BNXT_RE_CONTEXT_TYPE_SRQ_SIZE_P5;
+		rcfw->srq_ctxm_data = vzalloc(ctx_size * CTXM_DATA_INDEX_MAX);
+		rcfw->srq_ctxm_size = ctx_size;
+	}
+
 	return 0;
 fail_free_cmdq_hwq:
 	bnxt_qplib_free_hwq(res, &rcfw->cmdq.hwq);
@@ -1211,6 +1231,8 @@ void bnxt_qplib_rcfw_stop_irq(struct bnxt_qplib_rcfw *rcfw, bool kill)
 	}
 	atomic_set(&rcfw->rcfw_intr_enabled, 0);
 	rcfw->num_irq_stopped++;
+	dev_dbg(&rcfw->pdev->dev, "%s: kill_tasklet %d from %ps", __func__,
+		kill, __builtin_return_address(0));
 	/* Cleanup Tasklet */
 	if (kill)
 		tasklet_kill(&creq->creq_tasklet);

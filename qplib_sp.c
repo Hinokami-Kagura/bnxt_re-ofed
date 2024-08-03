@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2023, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -31,8 +31,6 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Eddie Wai <eddie.wai@broadcom.com>
- *
  * Description: Slow Path Operators
  */
 
@@ -49,11 +47,11 @@
 #include "qplib_rcfw.h"
 #include "qplib_sp.h"
 #include "compat.h"
+#include "bnxt_re.h"
 
 const struct bnxt_qplib_gid bnxt_qplib_gid_zero = {{ 0, 0, 0, 0, 0, 0, 0, 0,
 						     0, 0, 0, 0, 0, 0, 0, 0 }};
 
-/* Device */
 static u8 bnxt_qplib_is_atomic_cap(struct bnxt_qplib_rcfw *rcfw)
 {
 	u16 pcie_ctl2 = 0;
@@ -96,6 +94,7 @@ int bnxt_qplib_get_dev_attr(struct bnxt_qplib_rcfw *rcfw)
 	struct bnxt_qplib_dev_attr *attr;
 	struct bnxt_qplib_chip_ctx *cctx;
 	struct cmdq_query_func req = {};
+	bool sw_max_en;
 	u8 *tqm_alloc;
 	int i, rc = 0;
 	u32 temp;
@@ -121,9 +120,10 @@ int bnxt_qplib_get_dev_attr(struct bnxt_qplib_rcfw *rcfw)
 		goto bail;
 
 	bnxt_qplib_max_res_supported(cctx, rcfw->res, &dev_res, false);
+	sw_max_en = BNXT_EN_SW_RES_LMT(rcfw->res->en_dev);
 	/* Extract the context from the side buffer */
-	attr->max_qp = le32_to_cpu(sb->max_qp);
-	attr->max_qp = min_t(u32, attr->max_qp, dev_res.max_qp);
+	attr->max_qp = bnxt_re_cap_fw_res(le32_to_cpu(sb->max_qp),
+					  dev_res.max_qp, sw_max_en);
 	/* max_qp value reported by FW does not include the QP1 */
 	attr->max_qp += 1;
 	attr->max_qp_rd_atom =
@@ -135,48 +135,48 @@ int bnxt_qplib_get_dev_attr(struct bnxt_qplib_rcfw *rcfw)
 	/* Report 1 less than the max_qp_wqes reported by FW as driver adds
 	 * one extra entry while creating the qp
 	 */
-	attr->max_qp_wqes = le16_to_cpu(sb->max_qp_wr) - 1;
+	attr->max_sq_wqes = le16_to_cpu(sb->max_qp_wr) - 1;
 	/* Adjust for max_qp_wqes for variable wqe */
 	if (cctx->modes.wqe_mode == BNXT_QPLIB_WQE_MODE_VARIABLE) {
-		attr->max_qp_wqes = BNXT_VAR_MAX_WQE - 1;
+		attr->max_sq_wqes = BNXT_VAR_MAX_WQE - 1;
 	}
+	attr->max_rq_wqes = BNXT_RE_MAX_RQ_WQES;
 
 	if (!_is_chip_gen_p5_p7(cctx)) {
 		/*
 		 * 128 WQEs needs to be reserved for the HW (8916). Prevent
 		 * reporting the max number for gen-p4 only.
 		 */
-		attr->max_qp_wqes -= BNXT_QPLIB_RESERVED_QP_WRS;
+		attr->max_sq_wqes -= BNXT_QPLIB_RESERVED_QP_WRS;
 	}
 	attr->max_qp_sges = sb->max_sge;
 	if (_is_chip_gen_p5_p7(cctx) &&
 	    cctx->modes.wqe_mode == BNXT_QPLIB_WQE_MODE_VARIABLE)
 		attr->max_qp_sges = min_t(u32, sb->max_sge_var_wqe, BNXT_VAR_MAX_SGE);
 
-	attr->max_cq = le32_to_cpu(sb->max_cq);
-	attr->max_cq = min_t(u32, attr->max_cq, dev_res.max_cq);
-
+	attr->max_cq = bnxt_re_cap_fw_res(le32_to_cpu(sb->max_cq),
+					  dev_res.max_cq, sw_max_en);
 	attr->max_cq_wqes = le32_to_cpu(sb->max_cqe);
-	attr->max_cq_wqes = min_t(u32, BNXT_QPLIB_MAX_CQ_WQES, attr->max_cq_wqes);
-
+	if (!_is_chip_p7(cctx))
+		attr->max_cq_wqes = min_t(u32, BNXT_QPLIB_MAX_CQ_WQES, attr->max_cq_wqes);
 	attr->max_cq_sges = attr->max_qp_sges;
-	attr->max_mr = le32_to_cpu(sb->max_mr);
-	attr->max_mr = min_t(u32, attr->max_mr, dev_res.max_mr);
-	attr->max_mw = le32_to_cpu(sb->max_mw);
-	attr->max_mw = min_t(u32, attr->max_mw, dev_res.max_mr);
+	attr->max_mr = bnxt_re_cap_fw_res(le32_to_cpu(sb->max_mr),
+					  dev_res.max_mr, sw_max_en);
+	attr->max_mw = bnxt_re_cap_fw_res(le32_to_cpu(sb->max_mw),
+					  dev_res.max_mr, sw_max_en);
 
 	attr->max_mr_size = le64_to_cpu(sb->max_mr_size);
-	attr->max_pd = le32_to_cpu(sb->max_pd);
-	attr->max_pd = min_t(u32, attr->max_pd, dev_res.max_pd);
+	attr->max_pd = bnxt_re_cap_fw_res(le32_to_cpu(sb->max_pd),
+					  dev_res.max_pd, sw_max_en);
 	attr->max_raw_ethy_qp = le32_to_cpu(sb->max_raw_eth_qp);
-	attr->max_ah = le32_to_cpu(sb->max_ah);
-	attr->max_ah = min_t(u32, attr->max_ah, dev_res.max_ah);
+	attr->max_ah = bnxt_re_cap_fw_res(le32_to_cpu(sb->max_ah),
+					  dev_res.max_ah, sw_max_en);
 
 	attr->max_fmr = le32_to_cpu(sb->max_fmr);
 	attr->max_map_per_fmr = sb->max_map_per_fmr;
 
-	attr->max_srq = le16_to_cpu(sb->max_srq);
-	attr->max_srq = min_t(u32, attr->max_srq, dev_res.max_srq);
+	attr->max_srq = bnxt_re_cap_fw_res(le16_to_cpu(sb->max_srq),
+					   dev_res.max_srq, sw_max_en);
 	attr->max_srq_wqes = le32_to_cpu(sb->max_srq_wr) - 1;
 	attr->max_srq_sges = sb->max_srq_sge;
 	attr->max_pkey = 1;
@@ -191,16 +191,19 @@ int bnxt_qplib_get_dev_attr(struct bnxt_qplib_rcfw *rcfw)
 	}
 	attr->max_sgid = le32_to_cpu(sb->max_gid);
 
-	/* TODO: remove this hack for statically allocated gid_map */
-	bnxt_re_set_max_gid(&attr->max_sgid);
+	/*
+	 * SGID table can not be more than 256. For each
+	 * GID in HW table, we consume 2 GID entries in the kernel GID table.
+	 * Restrict the GID table length by the max_sgid returned by FW
+	 */
+	attr->max_sgid = min_t(u32, 256, 2 * attr->max_sgid);
 
 	attr->dev_cap_flags = le16_to_cpu(sb->dev_cap_flags);
 	if (attr->dev_cap_flags & CREQ_QUERY_FUNC_RESP_SB_PINGPONG_PUSH_MODE)
 		cctx->modes.db_push_mode = BNXT_RE_PUSH_MODE_PPP;
-	if (attr->dev_cap_flags & CREQ_QUERY_FUNC_RESP_SB_EXPRESS_MODE_SUPPORTED)
-		cctx->modes.express_mode_supported = 1;
 
 	attr->dev_cap_ext_flags = sb->dev_cap_ext_flags;
+	attr->dev_cap_ext_flags2 = le16_to_cpu(sb->dev_cap_ext_flags_2);
 	attr->page_size_cap = BIT_ULL(28) | BIT_ULL(21) | BIT_ULL(16) | BIT_ULL(12);
 
 	bnxt_qplib_query_version(rcfw, attr->fw_ver);
@@ -328,7 +331,6 @@ int bnxt_qplib_del_sgid(struct bnxt_qplib_sgid_tbl *sgid_tbl,
 	struct bnxt_qplib_rcfw *rcfw = res->rcfw;
 	int index;
 
-	/* Do we need a sgid_lock here? */
 	if (!sgid_tbl->active) {
 		dev_err(&res->pdev->dev,
 			"QPLIB: SGID table has no active entries");
@@ -387,7 +389,6 @@ int bnxt_qplib_add_sgid(struct bnxt_qplib_sgid_tbl *sgid_tbl,
 	struct bnxt_qplib_rcfw *rcfw = res->rcfw;
 	int i, free_idx;
 
-	/* Do we need a sgid_lock here? */
 	if (sgid_tbl->active == sgid_tbl->max) {
 		dev_err(&res->pdev->dev, "QPLIB: SGID table is full");
 		return -ENOMEM;
@@ -462,7 +463,6 @@ int bnxt_qplib_add_sgid(struct bnxt_qplib_sgid_tbl *sgid_tbl,
 		 free_idx, sgid_tbl->hw_id[free_idx], sgid_tbl->active);
 
 	*index = free_idx;
-	/* unlock */
 	return 0;
 }
 
@@ -651,7 +651,6 @@ int bnxt_qplib_reg_mr(struct bnxt_qplib_res *res,
 	u32 buf_pg_size;
 	u16 flags = 0;
 	u32 pg_size;
-	u8 cmd_size;
 	u16 level;
 	int rc;
 
@@ -675,7 +674,6 @@ int bnxt_qplib_reg_mr(struct bnxt_qplib_res *res,
 		}
 	}
 
-	/* Configure the request */
 	if (mrinfo->is_dma) {
 		/* No PBL provided, just use system PAGE_SIZE */
 		level = 0;
@@ -698,19 +696,16 @@ int bnxt_qplib_reg_mr(struct bnxt_qplib_res *res,
 	req.va = cpu_to_le64(mr->va);
 	req.key = cpu_to_le32(mr->lkey);
 	if (_is_alloc_mr_unified(res->dattr)) {
-		flags = 0;
 		req.key = cpu_to_le32(mr->pd->id);
 		flags |= CMDQ_REGISTER_MR_FLAGS_ALLOC_MR;
-		req.flags = cpu_to_le16(flags);
 	}
+	if (mrinfo->request_relax_order)
+		flags |= CMDQ_REGISTER_MR_FLAGS_ENABLE_RO;
+	req.flags = cpu_to_le16(flags);
 	req.mr_size = cpu_to_le64(mr->total_size);
-	cmd_size = sizeof(req);
-	if (!_is_steering_tag_supported(res))
-		cmd_size -= BNXT_RE_STEERING_TAG_SUPPORTED_CMD_SIZE;
-
 	bnxt_qplib_rcfw_cmd_prep(&req, CMDQ_BASE_OPCODE_REGISTER_MR,
-				 cmd_size);
-	bnxt_qplib_fill_cmdqmsg(&msg, &req, &resp, NULL, cmd_size,
+				 sizeof(req));
+	bnxt_qplib_fill_cmdqmsg(&msg, &req, &resp, NULL, sizeof(req),
 				sizeof(resp), block);
 	rc = bnxt_qplib_rcfw_send_message(rcfw, &msg);
 	if (rc)
@@ -779,8 +774,8 @@ int bnxt_qplib_map_tc2cos(struct bnxt_qplib_res *res, u16 *cids)
 	return rc;
 }
 
-void bnxt_qplib_fill_cc_gen1(struct cmdq_modify_roce_cc_gen1_tlv *ext_req,
-			     struct bnxt_qplib_cc_param_ext *cc_ext)
+static void bnxt_qplib_fill_cc_gen1(struct cmdq_modify_roce_cc_gen1_tlv *ext_req,
+				    struct bnxt_qplib_cc_param_ext *cc_ext)
 {
 	ext_req->modify_mask = cpu_to_le64(cc_ext->ext_mask);
 	cc_ext->ext_mask = 0;
@@ -827,8 +822,8 @@ void bnxt_qplib_fill_cc_gen1(struct cmdq_modify_roce_cc_gen1_tlv *ext_req,
 	ext_req->reduce_init_cong_free_rtts_th = cpu_to_le16(cc_ext->reduce_cf_rtt_th);
 }
 
-void bnxt_qplib_fill_cc_gen2(struct cmdq_modify_roce_cc_gen2_tlv *ext2_req,
-			     struct bnxt_qplib_cc_param_ext2 *cc_ext2)
+static  void bnxt_qplib_fill_cc_gen2(struct cmdq_modify_roce_cc_gen2_tlv *ext2_req,
+				     struct bnxt_qplib_cc_param_ext2 *cc_ext2)
 {
 	u32 act;
 
@@ -929,8 +924,8 @@ int bnxt_qplib_modify_cc(struct bnxt_qplib_res *res,
 	return rc;
 }
 
-void bnxt_qplib_read_cc_gen1(struct bnxt_qplib_cc_param_ext *cc_ext,
-			     struct creq_query_roce_cc_gen1_resp_sb_tlv *sb)
+static void bnxt_qplib_read_cc_gen1(struct bnxt_qplib_cc_param_ext *cc_ext,
+				    struct creq_query_roce_cc_gen1_resp_sb_tlv *sb)
 {
 	cc_ext->inact_th_hi = le16_to_cpu(sb->inactivity_th_hi);
 	cc_ext->min_delta_cnp = le16_to_cpu(sb->min_time_between_cnps);
@@ -975,8 +970,8 @@ void bnxt_qplib_read_cc_gen1(struct bnxt_qplib_cc_param_ext *cc_ext,
 	cc_ext->reduce_cf_rtt_th = le16_to_cpu(sb->reduce_init_cong_free_rtts_th);
 }
 
-void bnxt_qplib_read_cc_gen2(struct bnxt_qplib_cc_param_ext2 *cc_ext2,
-			     struct creq_query_roce_cc_gen2_resp_sb_tlv *sb)
+static void bnxt_qplib_read_cc_gen2(struct bnxt_qplib_cc_param_ext2 *cc_ext2,
+				    struct creq_query_roce_cc_gen2_resp_sb_tlv *sb)
 {
 	int i;
 
@@ -1086,35 +1081,25 @@ int bnxt_qplib_get_roce_error_stats(struct bnxt_qplib_rcfw *rcfw,
 		return -ENOMEM;
 	sb = sbuf.sb;
 
-	if (rcfw->res->cctx->hwrm_intf_ver >= HWRM_VERSION_ROCE_STATS_FN_ID) {
-		if (sinfo->function_id != 0xFFFFFFFF) {
-			cmd_flags = CMDQ_QUERY_ROCE_STATS_FLAGS_FUNCTION_ID;
-			if (sinfo->vf_valid) {
-				fn_id = CMDQ_QUERY_ROCE_STATS_VF_VALID;
-				fn_id |= (sinfo->function_id <<
-					  CMDQ_QUERY_ROCE_STATS_VF_NUM_SFT) &
-					  CMDQ_QUERY_ROCE_STATS_VF_NUM_MASK;
-			} else {
-				fn_id = sinfo->function_id &
-					CMDQ_QUERY_ROCE_STATS_PF_NUM_MASK;
-			}
+	if (sinfo->function_id != 0xFFFFFFFF) {
+		cmd_flags = CMDQ_QUERY_ROCE_STATS_FLAGS_FUNCTION_ID;
+		if (sinfo->vf_valid) {
+			fn_id = CMDQ_QUERY_ROCE_STATS_VF_VALID;
+			fn_id |= (sinfo->function_id <<
+					CMDQ_QUERY_ROCE_STATS_VF_NUM_SFT) &
+				CMDQ_QUERY_ROCE_STATS_VF_NUM_MASK;
+		} else {
+			fn_id = sinfo->function_id &
+				CMDQ_QUERY_ROCE_STATS_PF_NUM_MASK;
 		}
+	}
 
-		req.flags = cpu_to_le16(cmd_flags);
-		req.function_id = cpu_to_le32(fn_id);
+	req.flags = cpu_to_le16(cmd_flags);
+	req.function_id = cpu_to_le32(fn_id);
 
-		if (sinfo->collection_id != 0xFF) {
-			cmd_flags |= CMDQ_QUERY_ROCE_STATS_FLAGS_COLLECTION_ID;
-			req.collection_id = sinfo->collection_id;
-		}
-	} else {
-		/* For older HWRM version, the command length has to be
-		 * adjusted. 8 bytes are more in the newer command.
-		 * So subtract these 8 bytes for older HWRM version.
-		 * command units are adjusted inside
-		 * bnxt_qplib_rcfw_send_message.
-		 */
-		req.cmd_size -= 8;
+	if (sinfo->collection_id != 0xFF) {
+		cmd_flags |= CMDQ_QUERY_ROCE_STATS_FLAGS_COLLECTION_ID;
+		req.collection_id = sinfo->collection_id;
 	}
 
 	req.resp_size = sbuf.size / BNXT_QPLIB_CMDQE_UNITS;
@@ -1181,6 +1166,47 @@ int bnxt_qplib_get_roce_error_stats(struct bnxt_qplib_rcfw *rcfw,
 bail:
 	dma_free_coherent(&rcfw->pdev->dev, sbuf.size,
 				  sbuf.sb, sbuf.dma_addr);
+	return rc;
+}
+
+int bnxt_qplib_read_context(struct bnxt_qplib_rcfw *rcfw, u8 res_type,
+			    u32 xid, u32 resp_size, void *resp_va)
+{
+	struct creq_read_context resp = {};
+	struct bnxt_qplib_cmdqmsg msg = {};
+	struct cmdq_read_context req = {};
+	struct bnxt_qplib_rcfw_sbuf sbuf;
+	int rc = 0;
+
+	sbuf.size = resp_size;
+	sbuf.sb = dma_zalloc_coherent(&rcfw->pdev->dev, sbuf.size,
+				      &sbuf.dma_addr, GFP_KERNEL);
+	if (!sbuf.sb) {
+		dev_err(&rcfw->pdev->dev,
+			"From %s %d failed\n", __func__, __LINE__);
+		return -ENOMEM;
+	}
+
+	bnxt_qplib_rcfw_cmd_prep(&req, CMDQ_BASE_OPCODE_READ_CONTEXT, sizeof(req));
+	req.resp_addr = cpu_to_le64(sbuf.dma_addr);
+	req.resp_size = resp_size / BNXT_QPLIB_CMDQE_UNITS;
+
+	req.xid = cpu_to_le32(xid);
+	req.type = res_type;
+
+	dev_dbg(&rcfw->pdev->dev,
+		"res_type 0x%x xid 0x%x read context resp size 0x%x\n",
+		res_type, xid, resp_size);
+
+	bnxt_qplib_fill_cmdqmsg(&msg, &req, &resp, &sbuf, sizeof(req),
+				sizeof(resp), 0);
+	rc = bnxt_qplib_rcfw_send_message(rcfw, &msg);
+	if (rc)
+		goto bail;
+
+	memcpy(resp_va, sbuf.sb, resp_size);
+bail:
+	dma_free_coherent(&rcfw->pdev->dev, sbuf.size, sbuf.sb, sbuf.dma_addr);
 	return rc;
 }
 

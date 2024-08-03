@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2022, Broadcom. All rights reserved.  The term
+ * Copyright (c) 2015-2024, Broadcom. All rights reserved.  The term
  * Broadcom refers to Broadcom Inc. and/or its subsidiaries.
  *
  * This software is available to you under a choice of one of two
@@ -31,8 +31,6 @@
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN
  * IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * Author: Devesh Sharma <devesh.sharma@broadcom.com>
- *
  * Description: statistics related data structures
  */
 
@@ -41,6 +39,10 @@
 
 #define BNXT_RE_CFA_STAT_BYTES_MASK 0xFFFFFFFFF
 #define BNXT_RE_CFA_STAT_PKTS_MASK 0xFFFFFFF
+
+#define BNXT_RE_RDATA_STAT(hw_stat, rdata)	\
+		((hw_stat) ? (le64_to_cpu(hw_stat)) : (rdata))
+
 enum{
 	BYTE_MASK = 0,
 	PKTS_MASK = 1
@@ -225,8 +227,5 @@ static inline void bnxt_re_clear_rsors_stat(struct bnxt_re_res_cntrs *rsors)
 }
 
 int bnxt_re_get_device_stats(struct bnxt_re_dev *rdev);
-int bnxt_re_get_flow_stats_from_service_pf(struct bnxt_re_dev *rdev,
-				struct bnxt_re_flow_counters *stats,
-				struct bnxt_qplib_query_stats_info *sinfo);
 int bnxt_re_get_qos_stats(struct bnxt_re_dev *rdev);
 #endif /* __STATS_H__ */
