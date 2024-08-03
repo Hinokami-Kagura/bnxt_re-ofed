@@ -89,14 +89,14 @@ ifeq ($(OFED_VERSION), )
 endif
 
 #find OFED version and compat-includes
-ofed_major=$(filter OFED-3.% OFED-4.%, $(OFED_VERSION))
-ifneq ($(ofed_major), )
-exists=$(shell if [ -e /usr/src/compat-rdma$(OFED_VERSION) ];\
-                then echo y; fi)
-ifeq ($(exists), )
-$(shell ln -s /usr/src/compat-rdma\
-         /usr/src/compat-rdma$(OFED_VERSION))
-endif
+#ofed_major=$(filter OFED-3.% OFED-4.%, $(OFED_VERSION))
+#ifneq ($(ofed_major), )
+#exists=$(shell if [ -e /usr/src/compat-rdma$(OFED_VERSION) ];\
+#                then echo y; fi)
+#ifeq ($(exists), )
+#$(shell ln -s /usr/src/compat-rdma\
+#         /usr/src/compat-rdma$(OFED_VERSION))
+#endif
 OFA_BUILD_PATH=/usr/src/ofa_kernel/default
 OFA_KERNEL_PATH=/usr/src/ofa_kernel/default
 EXTRA_CFLAGS += -DOFED_3_x
@@ -107,15 +107,15 @@ endif
 EXTRA_CFLAGS += -include $(OFA_KERNEL_PATH)/include/linux/compat-2.6.h
 
 AUTOCONF_H = -include $(shell /bin/ls -1 $(LINUX)/include/*/autoconf.h 2> /dev/null | head -1)
-endif #end non 3.x OFED
+#endif #end non 3.x OFED
 
-ifeq (OFED-NATIVE, $(findstring OFED-NATIVE, $(OFED_VERSION)))
-OFA_KERNEL_PATH=$(LINUXSRC)
-OFA_BUILD_PATH=$(LINUX)
-else
+#ifeq (OFED-NATIVE, $(findstring OFED-NATIVE, $(OFED_VERSION)))
+#OFA_KERNEL_PATH=$(LINUXSRC)
+#OFA_BUILD_PATH=$(LINUX)
+#else
 # Add OFED symbols only if external OFED is used
 KBUILD_EXTRA_SYMBOLS := $(OFA_BUILD_PATH)/Module.symvers
-endif
+#endif
 
 ifneq ($(BNXT_PEER_MEM_INC),)
 KBUILD_EXTRA_SYMBOLS += $(BNXT_PEER_MEM_INC)/Module.symvers
