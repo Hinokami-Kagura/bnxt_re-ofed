@@ -97,8 +97,8 @@ ifeq ($(exists), )
 $(shell ln -s /usr/src/compat-rdma\
          /usr/src/compat-rdma$(OFED_VERSION))
 endif
-OFA_BUILD_PATH=/usr/src/compat-rdma$(OFED_VERSION)
-OFA_KERNEL_PATH=/usr/src/compat-rdma$(OFED_VERSION)
+OFA_BUILD_PATH=/usr/src/ofa_kernel/default
+OFA_KERNEL_PATH=/usr/src/ofa_kernel/default
 EXTRA_CFLAGS += -DOFED_3_x
 ofed_4_17_x=$(filter OFED-4.17%, $(ofed_major))
 ifneq ($(ofed_4_17_x), )
