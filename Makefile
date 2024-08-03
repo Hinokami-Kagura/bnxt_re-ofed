@@ -769,7 +769,7 @@ BCM_DRV = bnxt_re.ko
 
 KSRC=$(LINUXSRC)
 
-ifneq (OFED-NATIVE, $(findstring OFED-NATIVE, $(OFED_VERSION)))
+#ifneq (OFED-NATIVE, $(findstring OFED-NATIVE, $(OFED_VERSION)))
 OFED_INCLUDES := LINUXINCLUDE=' \
                 $(AUTOCONF_H) \
                 -I$(OFA_KERNEL_PATH)/include \
@@ -792,7 +792,7 @@ OFED_INCLUDES := LINUXINCLUDE=' \
 
 OFA_KERNEL_LINK = $(OFA_KERNEL_PATH)
 OFA_BUILD_LINK = $(OFA_BUILD_PATH)
-endif
+#endif
 
 cflags-y += $(EXTRA_CFLAGS)
 
