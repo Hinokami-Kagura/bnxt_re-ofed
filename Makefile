@@ -107,6 +107,7 @@ endif
 EXTRA_CFLAGS += -include $(OFA_KERNEL_PATH)/include/linux/compat-2.6.h
 
 AUTOCONF_H = -include $(shell /bin/ls -1 $(LINUX)/include/*/autoconf.h 2> /dev/null | head -1)
+AUTOCONF_H += -include $(LINUXSRC)/include/linux/kconfig.h
 #endif #end non 3.x OFED
 
 #ifeq (OFED-NATIVE, $(findstring OFED-NATIVE, $(OFED_VERSION)))
