@@ -201,6 +201,7 @@ static ssize_t bnxt_re_info_debugfs_clear(struct file *fil, const char __user *u
 	atomic_set(&rsors->max_srq_count, atomic_read(&rsors->srq_count));
 	atomic_set(&rsors->max_cq_count, atomic_read(&rsors->cq_count));
 	atomic_set(&rsors->max_mr_count, atomic_read(&rsors->mr_count));
+	atomic_set(&rsors->max_mr_dmabuf_count, atomic_read(&rsors->mr_dmabuf_count));
 	atomic_set(&rsors->max_mw_count, atomic_read(&rsors->mw_count));
 	atomic_set(&rsors->max_ah_count, atomic_read(&rsors->ah_count));
 	atomic_set(&rsors->max_pd_count, atomic_read(&rsors->pd_count));
@@ -527,6 +528,15 @@ static void bnxt_re_print_ext_stat(struct bnxt_re_dev *rdev,
 	if (_is_chip_p7(rdev->chip_ctx)) {
 		seq_printf(s, "\trx_dcn_payload_cut: %llu\n", ext_s->rx_dcn_payload_cut);
 		seq_printf(s, "\tte_bypassed: %llu\n", ext_s->te_bypassed);
+		if (BNXT_RE_DCN_ENABLED(rdev->rcfw.res)) {
+			seq_printf(s, "\ttx_dcn_cnp: %llu\n", ext_s->tx_dcn_cnp);
+			seq_printf(s, "\trx_dcn_cnp: %llu\n", ext_s->rx_dcn_cnp);
+			seq_printf(s, "\trx_payload_cut: %llu\n", ext_s->rx_payload_cut);
+			seq_printf(s, "\trx_payload_cut_ignored: %llu\n",
+				   ext_s->rx_payload_cut_ignored);
+			seq_printf(s, "\trx_dcn_cnp_ignored: %llu\n",
+				   ext_s->rx_dcn_cnp_ignored);
+		}
 	}
 
 	if (rdev->binfo) {
@@ -591,9 +601,9 @@ static int bnxt_re_info_debugfs_show(struct seq_file *s, void *unused)
 	struct bnxt_re_ext_roce_stats *e_errs;
 	struct bnxt_re_rdata_counters *rstat;
 	struct bnxt_qplib_roce_stats *errs;
+	int sched_msec, i, ext_stats;
 	unsigned long tstamp_diff;
 	struct pci_dev *pdev;
-	int sched_msec, i;
 	int rc = 0;
 
 	seq_printf(s, "bnxt_re debug info:\n");
@@ -645,6 +655,8 @@ skip_query:
 		   atomic_read(&rdev->stats.rsors.cq_count));
 	seq_printf(s, "\tActive MR:\t%d\n",
 		   atomic_read(&rdev->stats.rsors.mr_count));
+	seq_printf(s, "\tActive DMABUF MR: %d\n",
+		   atomic_read(&rdev->stats.rsors.mr_dmabuf_count));
 	seq_printf(s, "\tActive MW:\t%d\n",
 		   atomic_read(&rdev->stats.rsors.mw_count));
 	seq_printf(s, "\tActive AH:\t%d\n",
@@ -663,6 +675,8 @@ skip_query:
 		   atomic_read(&rdev->stats.rsors.max_cq_count));
 	seq_printf(s, "\tMR Watermark:\t%d\n",
 		   atomic_read(&rdev->stats.rsors.max_mr_count));
+	seq_printf(s, "\tDMABUF MR Watermark: %d\n",
+		   atomic_read(&rdev->stats.rsors.max_mr_dmabuf_count));
 	seq_printf(s, "\tMW Watermark:\t%d\n",
 		   atomic_read(&rdev->stats.rsors.max_mw_count));
 	seq_printf(s, "\tAH Watermark:\t%d\n",
@@ -679,25 +693,27 @@ skip_query:
 		bnxt_re_print_normal_counters(rdev, s);
 
 	seq_printf(s, "\tmax_retry_exceeded: %llu\n", errs->max_retry_exceeded);
-	/* handle Thor2 & ext attr stats supporting nics here */
-	if (bnxt_ext_stats_supported(rdev->chip_ctx, rdev->dev_attr->dev_cap_flags,
-				     rdev->is_virtfn) &&
-	    _is_hw_retx_supported(rdev->dev_attr->dev_cap_flags)) {
+	/* For HW req retx pick from extended stats */
+	ext_stats = bnxt_ext_stats_supported(rdev->chip_ctx, rdev->dev_attr->dev_cap_flags,
+					     rdev->is_virtfn);
+	if (_is_hw_req_retx_supported(rdev->dev_attr->dev_cap_flags) && ext_stats) {
 		seq_printf(s, "\tto_retransmits: %llu\n", e_errs->to_retransmits);
 		seq_printf(s, "\tseq_err_naks_rcvd: %llu\n", e_errs->seq_err_naks_rcvd);
 		seq_printf(s, "\trnr_naks_rcvd: %llu\n", e_errs->rnr_naks_rcvd);
 		seq_printf(s, "\tmissing_resp: %llu\n", e_errs->missing_resp);
-		if (_is_hw_resp_retx_supported(rdev->dev_attr->dev_cap_flags))
-			seq_printf(s, "\tdup_reqs: %llu\n", e_errs->dup_req);
-		else
-			seq_printf(s, "\tdup_reqs: %llu\n", errs->dup_req);
 	} else {
 		seq_printf(s, "\tto_retransmits: %llu\n", errs->to_retransmits);
 		seq_printf(s, "\tseq_err_naks_rcvd: %llu\n", errs->seq_err_naks_rcvd);
 		seq_printf(s, "\trnr_naks_rcvd: %llu\n", errs->rnr_naks_rcvd);
 		seq_printf(s, "\tmissing_resp: %llu\n", errs->missing_resp);
-		seq_printf(s, "\tdup_req: %llu\n", errs->dup_req);
 	}
+
+	/* For HW res retx pick from extended stats */
+	if (_is_hw_resp_retx_supported(rdev->dev_attr->dev_cap_flags) && ext_stats)
+		seq_printf(s, "\tdup_req: %llu\n", e_errs->dup_req);
+	else
+		seq_printf(s, "\tdup_req: %llu\n", errs->dup_req);
+
 	seq_printf(s, "\tunrecoverable_err: %llu\n", errs->unrecoverable_err);
 	seq_printf(s, "\tbad_resp_err: %llu\n", errs->bad_resp_err);
 	seq_printf(s, "\tlocal_qp_op_err: %llu\n", errs->local_qp_op_err);
@@ -985,10 +1001,317 @@ static const struct file_operations bnxt_re_drv_stats_dbg_ops = {
 	.release	= bnxt_re_debugfs_release,
 };
 
+/*
+ * bnxt_re_hex_dump -   This function will print hexdump of given buffer
+ *                      It will also attempt pretty format if row data has all ZERO.
+ * @s:                  Sequential file pointer
+ * @buf:                Buffer to be dumped
+ * @sz:                 Size in bytes
+ * @format:             Different formats of dumping e.g. format=n will
+ *                      cause only 'n' 32 bit words to be dumped in a
+ *                      single line.
+ * @abs_offset:         absolute offset.
+ */
+inline void bnxt_re_hex_dump(struct seq_file *s, void *buf, int sz,
+			     int format, int abs_offset)
+{
+	int i, j, non_zero_data = 0, dump_this_row = 0, loop;
+	u32 *buf_loc = (u32 *)buf;
+
+	loop = (sz / sizeof(u32));
+
+	for (i = 0; i < loop; i++) {
+		if ((i % format) == 0) {
+			if (dump_this_row)
+				seq_puts(s, "\n");
+
+			non_zero_data = 0;
+			dump_this_row = 0;
+			/*
+			 * Below loop will check possible all zero data
+			 * in single raw. It is added to make smaller data
+			 * dump for better debugging.
+			 */
+			for (j = 0; j < format; j++) {
+				if (buf_loc[i + j])
+					non_zero_data++;
+			}
+
+			/* Force raw data dump at some intervals. */
+			if (non_zero_data || (i == 0) || (i == loop / 4) ||
+			    (i == loop / 2) || (i == (3 * loop / 4)))
+				dump_this_row = 1;
+
+			if (dump_this_row) {
+				if (non_zero_data)
+					seq_printf(s, "%08x: ", (i * 4) + abs_offset);
+				else
+					seq_printf(s, "\n%08x: ", (i * 4) + abs_offset);
+			} else {
+				seq_puts(s, ".");
+			}
+		}
+		if (dump_this_row)
+			seq_printf(s, "%08x ", buf_loc[i]);
+	}
+	seq_puts(s, "\n");
+}
+
+static void bnxt_re_print_pte_pbl(struct seq_file *s, struct bnxt_qplib_hwq *hwq)
+{
+	int i, j;
+
+	for (i = 0; i <= hwq->level; i++) {
+		struct bnxt_qplib_pbl *pbl = &hwq->pbl[i];
+
+		seq_printf(s, "[level %d]\n", i);
+		for (j = 0; j < pbl->pg_count; j++) {
+			seq_printf(s, "\t[%2d] va: 0x%llx pa: 0x%llx\n",
+				   j, (u64)hwq->pbl[i].pg_arr[j],
+				   hwq->pbl[i].pg_map_arr[j]);
+		}
+	}
+}
+
+/*
+ * bnxt_re_hwq_kernel_hex_dump - This function will print hexdump of kernel buffer.
+ * @s:                  Sequential file pointer
+ * @hwq:                hardware queue of rdma resources
+ *
+ * This function care about actual hwq page size.
+ */
+static void bnxt_re_hwq_kernel_hex_dump(struct seq_file *s,
+					struct bnxt_qplib_hwq *hwq)
+{
+	u32 npages, i, page_size;
+
+	npages = (hwq->max_elements / hwq->qe_ppg);
+
+	if (hwq->max_elements % hwq->qe_ppg)
+		npages++;
+
+	page_size = hwq->qe_ppg * hwq->element_size;
+	for (i = 0; i < npages; i++) {
+		seq_puts(s, "\n");
+		bnxt_re_hex_dump(s, hwq->pbl_ptr[i], page_size, 8, page_size * i);
+	}
+}
+
+/*
+ * bnxt_re_hwq_user_hex_dump - This function will print hexdump of given umem buffer.
+ * @s:                  Sequential file pointer
+ * @umem:               user memory from ib
+ *
+ * This function don't care about actual hwq page size.
+ * It use PAGE_SIZE and loop using offset field of ib_umem_copy_from
+ * just to avoid large vmalloc buffer.
+ */
+static void bnxt_re_hwq_user_hex_dump(struct seq_file *s,
+				      struct ib_umem *umem)
+{
+	size_t	length_remain, length;
+	u32 npages, i;
+	void *buf;
+
+	buf = vzalloc(PAGE_SIZE);
+	if (!buf)
+		return;
+
+	npages = (umem->length / PAGE_SIZE);
+
+	if (umem->length % PAGE_SIZE)
+		npages++;
+
+	length_remain = umem->length;
+	for (i = 0; i < npages; i++) {
+		seq_puts(s, "\n");
+		length = min_t(int, PAGE_SIZE, length_remain);
+
+		ib_umem_copy_from(buf, umem, i * PAGE_SIZE, length);
+		length_remain -= length;
+		bnxt_re_hex_dump(s, buf, length, 8, PAGE_SIZE * i);
+	}
+	vfree(buf);
+}
+
+static int bnxt_re_dump_pte_pbl_show(struct seq_file *s, void *unused)
+{
+	struct bnxt_re_dev *rdev = s->private;
+	struct bnxt_re_res_list *res_list;
+	struct bnxt_re_srq *srq;
+	struct bnxt_re_mr *mr;
+	struct bnxt_re_qp *qp;
+	struct bnxt_re_cq *cq;
+
+	if (!rdev)
+		return -ENODEV;
+
+	/* This debugfs is open only for P5 onwards chips */
+	if (!bnxt_re_is_rdev_valid(rdev) ||
+	    !_is_chip_gen_p5_p7(rdev->chip_ctx))
+		return -ENODEV;
+
+	seq_puts(s, "List of active PTEs and PBLs:\n");
+	seq_puts(s, "=============================\n");
+
+	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_QP];
+	spin_lock(&res_list->lock);
+	list_for_each_entry(qp, &res_list->head, res_list) {
+		seq_printf(s, "%s [xid 0x%x] %s\n", "qp_sq",
+			   qp->qplib_qp.id,
+			   qp->qplib_qp.is_user ? "user" : "kernel");
+		bnxt_re_print_pte_pbl(s, &qp->qplib_qp.sq.hwq);
+		seq_printf(s, "%s [xid 0x%x] %s\n", "qp_rcq",
+			   qp->qplib_qp.id,
+			   qp->qplib_qp.is_user ? "user" : "kernel");
+		bnxt_re_print_pte_pbl(s, &qp->qplib_qp.rq.hwq);
+	}
+	spin_unlock(&res_list->lock);
+
+	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_CQ];
+	spin_lock(&res_list->lock);
+	list_for_each_entry(cq, &res_list->head, res_list) {
+		seq_printf(s, "%s [xid 0x%x] %s\n", "cq",
+			   cq->qplib_cq.id,
+			   cq->qplib_cq.hwq.is_user ? "user" : "kernel");
+		bnxt_re_print_pte_pbl(s, &cq->qplib_cq.hwq);
+	}
+	spin_unlock(&res_list->lock);
+
+	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_MR];
+	spin_lock(&res_list->lock);
+	list_for_each_entry(mr, &res_list->head, res_list) {
+		seq_printf(s, "%s [lkey 0x%x] %s\n", "mr",
+			   mr->qplib_mr.lkey,
+			   mr->qplib_mr.hwq.is_user ? "user" : "kernel");
+		bnxt_re_print_pte_pbl(s, &mr->qplib_mr.hwq);
+	}
+	spin_unlock(&res_list->lock);
+
+	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_SRQ];
+	spin_lock(&res_list->lock);
+	list_for_each_entry(srq, &res_list->head, res_list) {
+		seq_printf(s, "%s [xid 0x%x] %s\n", "srq",
+			   srq->qplib_srq.id,
+			   srq->qplib_srq.is_user ? "user" : "kernel");
+		bnxt_re_print_pte_pbl(s, &srq->qplib_srq.hwq);
+	}
+	spin_unlock(&res_list->lock);
+
+	seq_puts(s, "\n");
+	return 0;
+}
+
+static int bnxt_re_active_res_dump_show(struct seq_file *s, void *unused)
+{
+	struct bnxt_re_dev *rdev = s->private;
+	struct bnxt_re_res_list *res_list;
+	struct bnxt_re_srq *srq;
+	struct bnxt_re_qp *qp;
+	struct bnxt_re_cq *cq;
+
+	if (!rdev)
+		return -ENODEV;
+
+	/* This debugfs is open only for P5 onwards chips */
+	if (!bnxt_re_is_rdev_valid(rdev) ||
+	    !_is_chip_gen_p5_p7(rdev->chip_ctx))
+		return -ENODEV;
+
+	seq_puts(s, "=============================\n");
+
+	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_QP];
+	spin_lock(&res_list->lock);
+	list_for_each_entry(qp, &res_list->head, res_list) {
+		seq_printf(s, "%s [xid 0x%x] %s\n", "qp_sq",
+			   qp->qplib_qp.id,
+			   qp->qplib_qp.is_user ? "user" : "kernel");
+		if (!qp->qplib_qp.is_user)
+			bnxt_re_hwq_kernel_hex_dump(s, &qp->qplib_qp.sq.hwq);
+		else
+			bnxt_re_hwq_user_hex_dump(s, qp->sumem);
+		seq_printf(s, "%s [xid 0x%x] %s\n", "qp_rq",
+			   qp->qplib_qp.id,
+			   qp->qplib_qp.is_user ? "user" : "kernel");
+		if (!qp->qplib_qp.is_user)
+			bnxt_re_hwq_kernel_hex_dump(s, &qp->qplib_qp.rq.hwq);
+		else
+			bnxt_re_hwq_user_hex_dump(s, qp->rumem);
+	}
+	spin_unlock(&res_list->lock);
+
+	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_CQ];
+	spin_lock(&res_list->lock);
+	list_for_each_entry(cq, &res_list->head, res_list) {
+		seq_printf(s, "%s [xid 0x%x] %s\n", "cq",
+			   cq->qplib_cq.id,
+			   cq->qplib_cq.hwq.is_user ? "user" : "kernel");
+		if (!cq->qplib_cq.hwq.is_user)
+			bnxt_re_hwq_kernel_hex_dump(s, &cq->qplib_cq.hwq);
+		else
+			bnxt_re_hwq_user_hex_dump(s, cq->umem);
+	}
+	spin_unlock(&res_list->lock);
+
+	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_SRQ];
+	spin_lock(&res_list->lock);
+	list_for_each_entry(srq, &res_list->head, res_list) {
+		seq_printf(s, "%s [xid 0x%x] %s\n", "srq",
+			   srq->qplib_srq.id,
+			   srq->qplib_srq.is_user ? "user" : "kernel");
+		if (!srq->qplib_srq.is_user)
+			bnxt_re_hwq_kernel_hex_dump(s, &srq->qplib_srq.hwq);
+		else
+			bnxt_re_hwq_user_hex_dump(s, srq->umem);
+	}
+	spin_unlock(&res_list->lock);
+
+	seq_puts(s, "\n");
+	return 0;
+}
+
+static int bnxt_re_dump_pte_pbl_open(struct inode *inode, struct file *file)
+{
+	struct bnxt_re_dev *rdev = inode->i_private;
+
+	return single_open(file, bnxt_re_dump_pte_pbl_show, rdev);
+}
+
+static const struct file_operations bnxt_re_bump_pte_pbl_dbg_ops = {
+	.owner		= THIS_MODULE,
+	.open		= bnxt_re_dump_pte_pbl_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= bnxt_re_debugfs_release,
+};
+
+static int bnxt_re_active_res_dump_open(struct inode *inode, struct file *file)
+{
+	struct bnxt_re_dev *rdev = inode->i_private;
+
+	return single_open(file, bnxt_re_active_res_dump_show, rdev);
+}
+
+static const struct file_operations bnxt_re_active_res_dump_ops = {
+	.owner		= THIS_MODULE,
+	.open		= bnxt_re_active_res_dump_open,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= bnxt_re_debugfs_release,
+};
+
 void bnxt_re_add_dbg_files(struct bnxt_re_dev *rdev)
 {
 	rdev->pdev_qpinfo_dir = debugfs_create_dir("qp_info",
 						   rdev->pdev_debug_dir);
+	rdev->pdev_debug_dump_dir = debugfs_create_dir("debug_dump",
+						       rdev->pdev_debug_dir);
+	rdev->pte_pbl_info = debugfs_create_file("dump_pte_pbl", 0400,
+						 rdev->pdev_debug_dump_dir, rdev,
+						 &bnxt_re_bump_pte_pbl_dbg_ops);
+	rdev->pte_pbl_info = debugfs_create_file("active_res_dump", 0400,
+						 rdev->pdev_debug_dump_dir, rdev,
+						 &bnxt_re_active_res_dump_ops);
 }
 
 static ssize_t bnxt_re_hdbr_dfs_read(struct file *filp, char __user *buffer,
@@ -1078,6 +1401,128 @@ static void bnxt_re_rem_hdbr_knobs(struct bnxt_re_dev *rdev)
 	rdev->hdbr_dbgfs = NULL;
 }
 
+static void bnxt_re_add_udcc_dbg(struct bnxt_re_dev *rdev)
+{
+	if (!bnxt_qplib_udcc_supported(rdev->chip_ctx))
+		return;
+	rdev->udcc_dbgfs_dir = debugfs_create_dir("udcc", rdev->pdev_debug_dir);
+	if (rdev->udcc_dbgfs_dir) {
+		rdev->udcc_dbg_info = kcalloc(BNXT_RE_UDCC_MAX_SESSIONS,
+					      sizeof(*rdev->udcc_dbg_info),
+					      GFP_KERNEL);
+		if (!rdev->udcc_dbg_info) {
+			debugfs_remove_recursive(rdev->udcc_dbgfs_dir);
+			rdev->udcc_dbgfs_dir = NULL;
+		}
+	}
+}
+
+static void bnxt_re_rem_udcc_dbg(struct bnxt_re_dev *rdev)
+{
+	if (rdev->udcc_dbgfs_dir) {
+		kfree(rdev->udcc_dbg_info);
+		rdev->udcc_dbg_info = NULL;
+		debugfs_remove_recursive(rdev->udcc_dbgfs_dir);
+		rdev->udcc_dbgfs_dir = NULL;
+	}
+}
+
+static ssize_t bnxt_re_udcc_session_query_read(struct file *filep, char __user *buffer,
+					       size_t count, loff_t *ppos)
+{
+	struct bnxt_re_udcc_dbg_info *udcc_info = filep->private_data;
+	struct hwrm_udcc_session_query_output resp;
+	struct hwrm_udcc_session_query_input req;
+	struct bnxt_fw_msg fw_msg = {};
+	int len = 0, size = 4096;
+	char *buf;
+	int rc;
+
+	bnxt_re_init_hwrm_hdr((void *)&req, HWRM_UDCC_SESSION_QUERY, -1);
+	req.session_id = cpu_to_le16(udcc_info->session_id);
+	bnxt_re_fill_fw_msg(&fw_msg, (void *)&req, sizeof(req), (void *)&resp,
+			    sizeof(resp), DFLT_HWRM_CMD_TIMEOUT);
+	rc = bnxt_send_msg(udcc_info->rdev->en_dev, &fw_msg);
+	if (rc)
+		return rc;
+
+	buf = kzalloc(size, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	len = scnprintf(buf, size, "min_rtt_ns = %u\n",
+			le32_to_cpu(resp.min_rtt_ns));
+	len += scnprintf(buf + len, size - len, "max_rtt_ns = %u\n",
+			le32_to_cpu(resp.max_rtt_ns));
+	len += scnprintf(buf + len, size - len, "cur_rate_mbps = %u\n",
+			le32_to_cpu(resp.cur_rate_mbps));
+	len += scnprintf(buf + len, size - len, "tx_event_count = %u\n",
+			le32_to_cpu(resp.tx_event_count));
+	len += scnprintf(buf + len, size - len, "cnp_rx_event_count = %u\n",
+			le32_to_cpu(resp.cnp_rx_event_count));
+	len += scnprintf(buf + len, size - len, "rtt_req_count = %u\n",
+			le32_to_cpu(resp.rtt_req_count));
+	len += scnprintf(buf + len, size - len, "rtt_resp_count = %u\n",
+			le32_to_cpu(resp.rtt_resp_count));
+	len += scnprintf(buf + len, size - len, "tx_bytes_sent = %u\n",
+			le32_to_cpu(resp.tx_bytes_count));
+	len += scnprintf(buf + len, size - len, "tx_pkts_sent = %u\n",
+			le32_to_cpu(resp.tx_packets_count));
+	len += scnprintf(buf + len, size - len, "init_probes_sent = %u\n",
+			le32_to_cpu(resp.init_probes_sent));
+	len += scnprintf(buf + len, size - len, "term_probes_recv = %u\n",
+			le32_to_cpu(resp.term_probes_recv));
+	len += scnprintf(buf + len, size - len, "cnp_packets_recv = %u\n",
+			le32_to_cpu(resp.cnp_packets_recv));
+	len += scnprintf(buf + len, size - len, "rto_event_recv = %u\n",
+			le32_to_cpu(resp.rto_event_recv));
+	len += scnprintf(buf + len, size - len, "seq_err_nak_recv = %u\n",
+			le32_to_cpu(resp.seq_err_nak_recv));
+	len += scnprintf(buf + len, size - len, "qp_count = %u\n",
+			le32_to_cpu(resp.qp_count));
+
+	if (count < strlen(buf)) {
+		kfree(buf);
+		return -ENOSPC;
+	}
+
+	len = simple_read_from_buffer(buffer, count, ppos, buf, strlen(buf));
+	kfree(buf);
+	return len;
+}
+
+static const struct file_operations bnxt_re_udcc_session_query_ops = {
+	.owner  = THIS_MODULE,
+	.open   = simple_open,
+	.read   = bnxt_re_udcc_session_query_read,
+};
+
+void bnxt_re_debugfs_create_udcc_session(struct bnxt_re_dev *rdev, u32 session_id)
+{
+	struct bnxt_re_udcc_dbg_info *udcc_info;
+	static char sname[16];
+
+	if (!rdev->udcc_dbgfs_dir)
+		return;
+	udcc_info = &rdev->udcc_dbg_info[session_id];
+	if (udcc_info->session_dbgfs_dir)
+		return;
+	snprintf(sname, 10, "%d", session_id);
+	udcc_info->session_dbgfs_dir = debugfs_create_dir(sname, rdev->udcc_dbgfs_dir);
+	udcc_info->rdev = rdev;
+	udcc_info->session_id = session_id;
+	debugfs_create_file("session_query", 0644, udcc_info->session_dbgfs_dir,
+			    udcc_info, &bnxt_re_udcc_session_query_ops);
+}
+
+void bnxt_re_debugfs_delete_udcc_session(struct bnxt_re_dev *rdev, u32 session_id)
+{
+	struct bnxt_re_udcc_dbg_info *udcc_info = &rdev->udcc_dbg_info[session_id];
+
+	debugfs_remove_recursive(udcc_info->session_dbgfs_dir);
+	udcc_info->session_dbgfs_dir = NULL;
+}
+
 void bnxt_re_rename_debugfs_entry(struct bnxt_re_dev *rdev)
 {
 	struct dentry *port_debug_dir;
@@ -1122,14 +1567,55 @@ void bnxt_re_debugfs_add_pdev(struct bnxt_re_dev *rdev)
 	rdev->en_qp_dbg = 1;
 	bnxt_re_add_dbg_files(rdev);
 	bnxt_re_add_hdbr_knobs(rdev);
+	bnxt_re_add_udcc_dbg(rdev);
 }
 
 void bnxt_re_debugfs_rem_pdev(struct bnxt_re_dev *rdev)
 {
 	bnxt_re_rem_hdbr_knobs(rdev);
+	bnxt_re_rem_udcc_dbg(rdev);
 	debugfs_remove_recursive(rdev->pdev_debug_dir);
 	rdev->pdev_debug_dir = NULL;
 }
+
+static int bnxt_re_peer_mmap_info_show(struct seq_file *s, void *unused)
+{
+	struct bnxt_re_dev *rdev = s->private;
+	int i;
+
+	if (!bnxt_re_is_rdev_valid(rdev))
+		return -ENODEV;
+
+	if (!rdev->en_dev->bar_cnt) {
+		seq_puts(s, "No peer mmap data available with bnxt_re\n");
+		goto no_data;
+	}
+
+	seq_puts(s, "bnxt_re peer mmap info:\n");
+	for (i = 0; i < rdev->en_dev->bar_cnt; i++) {
+		seq_printf(s, "\tHPA[%d]:\t\t0x%llx\n", i, rdev->qplib_res.bar_addr[i].hv_bar_addr);
+		seq_printf(s, "\tGPA[%d]:\t\t0x%llx\n", i, rdev->qplib_res.bar_addr[i].vm_bar_addr);
+		seq_printf(s, "\tSize[%d]:\t0x%llx\n", i, rdev->qplib_res.bar_addr[i].bar_size);
+	}
+
+no_data:
+	seq_puts(s, "\n");
+	return 0;
+}
+
+static int bnxt_re_peer_mmap_info_open(struct inode *inode, struct file *file)
+{
+	struct bnxt_re_dev *rdev = inode->i_private;
+
+	return single_open(file, bnxt_re_peer_mmap_info_show, rdev);
+}
+
+static const struct file_operations bnxt_re_peer_mmap_info_ops = {
+	.owner = THIS_MODULE,
+	.open = simple_open,
+	.open = bnxt_re_peer_mmap_info_open,
+	.read = seq_read,
+};
 
 void bnxt_re_debugfs_add_port(struct bnxt_re_dev *rdev, char *dev_name)
 {
@@ -1147,12 +1633,17 @@ void bnxt_re_debugfs_add_port(struct bnxt_re_dev *rdev, char *dev_name)
 	rdev->drv_dbg_stats = debugfs_create_file("drv_dbg_stats", 0644,
 						  rdev->port_debug_dir, rdev,
 						  &bnxt_re_drv_stats_dbg_ops);
+	rdev->peer_mmap = debugfs_create_file("peer_mmap", 0400,
+					      rdev->port_debug_dir, rdev,
+					      &bnxt_re_peer_mmap_info_ops);
 }
 
 void bnxt_re_rem_dbg_files(struct bnxt_re_dev *rdev)
 {
 	debugfs_remove_recursive(rdev->pdev_qpinfo_dir);
 	rdev->pdev_qpinfo_dir = NULL;
+	debugfs_remove_recursive(rdev->pdev_debug_dump_dir);
+	rdev->pdev_debug_dump_dir = NULL;
 }
 
 void bnxt_re_debugfs_rem_port(struct bnxt_re_dev *rdev)

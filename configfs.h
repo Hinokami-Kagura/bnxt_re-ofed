@@ -105,6 +105,7 @@ struct bnxt_re_dev_group
 int bnxt_re_get_print_dscp_pri_mapping(struct bnxt_re_dev *rdev,
 				       char *buf,
 				       struct bnxt_qplib_cc_param *ccparam);
+u8 bnxt_re_get_priority_mask(struct bnxt_re_dev *rdev, u8 selector);
 int bnxt_re_configfs_init(void);
 void bnxt_re_configfs_exit(void);
 #endif

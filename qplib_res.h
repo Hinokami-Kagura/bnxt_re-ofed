@@ -91,6 +91,7 @@ struct bnxt_qplib_drv_modes {
 	u8	dbr_pacing_chip_p7;
 	u8	hdbr_enabled;
 	u8	udcc_supported;
+	u8	multiple_llq;
 };
 
 struct bnxt_qplib_chip_ctx {
@@ -177,10 +178,17 @@ static inline u8 bnxt_qplib_udcc_supported(struct bnxt_qplib_chip_ctx *cctx)
 	return cctx->modes.udcc_supported;
 }
 
+static inline u8 bnxt_qplib_multiple_llq_supported(struct bnxt_qplib_chip_ctx *cctx)
+{
+	return cctx->modes.multiple_llq;
+}
+
 /* Defines for handling the HWRM version check */
 #define HWRM_VERSION_DEV_ATTR_MAX_DPI	0x1000A0000000D
 /* HWRM version 1.10.3.18 */
 #define HWRM_VERSION_READ_CTX		0x1000A00030012
+/* HWRM version 1.10.3.72 */
+#define HWRM_VERSION_CC_EXT		0x1000A00030048
 
 #define PTR_CNT_PER_PG		(PAGE_SIZE / sizeof(void *))
 #define PTR_MAX_IDX_PER_PG	(PTR_CNT_PER_PG - 1)
@@ -239,6 +247,7 @@ struct bnxt_qplib_pbl {
 	u32				pg_size;
 	void				**pg_arr;
 	dma_addr_t			*pg_map_arr;
+	struct bnxt_qplib_res		*res;
 };
 
 struct bnxt_qplib_sg_info {
@@ -360,10 +369,11 @@ struct bnxt_qplib_dpi_tbl {
 };
 
 struct bnxt_qplib_stats {
-	dma_addr_t			dma_map;
-	void				*dma;
+	dma_addr_t			dma_handle;
+	void				*cpu_addr;
 	u32				size;
 	u32				fw_id;
+	u64				*sw_stats;
 };
 
 struct bnxt_qplib_vf_res {
@@ -453,6 +463,8 @@ struct bnxt_qplib_res {
 	bool				prio;
 	bool				is_vf;
 	struct bnxt_qplib_db_pacing_data *pacing_data;
+	atomic_t			bar_cnt;
+	struct bnxt_peer_bar_addr	bar_addr[BNXT_MAX_BAR_ADDR];
 };
 
 struct bnxt_qplib_query_stats_info {

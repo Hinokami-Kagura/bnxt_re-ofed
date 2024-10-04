@@ -94,6 +94,31 @@ static void __free_pbl(struct bnxt_qplib_res *res,
 	pbl->pg_size = 0;
 }
 
+static dma_addr_t
+bnxt_re_trap_and_map_addr(struct bnxt_qplib_pbl *pbl, dma_addr_t addr)
+{
+	struct bnxt_peer_bar_addr *bar_addr = pbl->res->bar_addr;
+	int count = atomic_read(&pbl->res->bar_cnt);
+	int i;
+
+	for (i = 0; i < count; i++) {
+		struct bnxt_peer_bar_addr bar = bar_addr[i];
+		dma_addr_t vm_bar_addr = bar.vm_bar_addr;
+		dma_addr_t hv_bar_addr = bar.hv_bar_addr;
+		u64 bar_size = bar.bar_size;
+
+		if (vm_bar_addr == hv_bar_addr)
+			continue;
+
+		if (addr >= vm_bar_addr && addr < vm_bar_addr + bar_size) {
+			addr = hv_bar_addr + (addr & ~vm_bar_addr);
+			break;
+		}
+	}
+
+	return addr;
+}
+
 #if !defined(HAVE_RDMA_UMEM_FOR_EACH_DMA_BLOCK) && !defined(HAVE_FOR_EACH_SG_DMA_PAGE)
 struct qplib_sg {
 	dma_addr_t 	pg_map_arr;
@@ -125,7 +150,9 @@ static int __fill_user_dma_pages(struct bnxt_qplib_pbl *pbl,
 		while (tmp_size > 0) {
 			addr = tmp_sg[sg_indx].pg_map_arr + offset;
 			if ((!sg_indx && !pg_indx) || !(addr & pmask)) {
-				pbl->pg_map_arr[pg_indx] = addr &(~pmask);
+				dma_addr_t dma_addr = (addr & (~pmask));
+
+				pbl->pg_map_arr[pg_indx] = bnxt_re_trap_and_map_addr(pbl, dma_addr);
 				pbl->pg_count++;
 				pg_indx++;
 			}
@@ -149,7 +176,9 @@ static int bnxt_qplib_fill_user_dma_pages(struct bnxt_qplib_pbl *pbl,
 	int pg_indx = 0;
 
 	rdma_umem_for_each_dma_block(sginfo->umem, &biter, sginfo->pgsize) {
-		pbl->pg_map_arr[pg_indx] = rdma_block_iter_dma_address(&biter);
+		dma_addr_t dma_addr = rdma_block_iter_dma_address(&biter);
+
+		pbl->pg_map_arr[pg_indx] = bnxt_re_trap_and_map_addr(pbl, dma_addr);
 		pbl->pg_arr[pg_indx] = NULL;
 		pbl->pg_count++;
 		pg_indx++;
@@ -165,7 +194,9 @@ static int bnxt_qplib_fill_user_dma_pages(struct bnxt_qplib_pbl *pbl,
 	for_each_sg_dma_page(sginfo->sghead, &sg_iter, sginfo->nmap, 0) {
 		addr = sg_page_iter_dma_address(&sg_iter);
 		if (!indx || !(addr & pmask)) {
-			pbl->pg_map_arr[pg_indx] = (addr & (~pmask));
+			dma_addr_t dma_addr = (addr & (~pmask));
+
+			pbl->pg_map_arr[pg_indx] = bnxt_re_trap_and_map_addr(pbl, dma_addr);
 			pbl->pg_arr[pg_indx] = NULL;
 			pbl->pg_count++;
 			pg_indx++;
@@ -198,6 +229,7 @@ static int __alloc_pbl(struct bnxt_qplib_res *res, struct bnxt_qplib_pbl *pbl,
 	pbl->pg_map_arr = vmalloc_array(sginfo->npages, sizeof(dma_addr_t));
 	if (!pbl->pg_map_arr) {
 		vfree(pbl->pg_arr);
+		pbl->pg_arr = NULL;
 		return -ENOMEM;
 	}
 	pbl->pg_count = 0;
@@ -218,6 +250,7 @@ static int __alloc_pbl(struct bnxt_qplib_res *res, struct bnxt_qplib_pbl *pbl,
 		}
 	} else {
 		is_umem = true;
+		pbl->res = res;
 		if (bnxt_qplib_fill_user_dma_pages(pbl, sginfo))
 			goto fail;
 	}
@@ -336,6 +369,8 @@ int bnxt_qplib_alloc_init_hwq(struct bnxt_qplib_hwq *hwq,
 			sginfo.pgsize = npde * PAGE_SIZE;
 			sginfo.npages = 1;
 			rc = __alloc_pbl(res, &hwq->pbl[PBL_LVL_0], &sginfo);
+			if (rc)
+				goto fail;
 
 			/* Alloc PBL pages */
 			sginfo.npages = npbl;
@@ -1078,9 +1113,10 @@ void bnxt_qplib_free_stat_mem(struct bnxt_qplib_res *res,
 	struct pci_dev *pdev;
 
 	pdev = res->pdev;
-	if (stats->dma)
+	if (stats->cpu_addr)
 		dma_free_coherent(&pdev->dev, stats->size,
-				  stats->dma, stats->dma_map);
+				  stats->cpu_addr, stats->dma_handle);
+	kfree(stats->sw_stats);
 
 	memset(stats, 0, sizeof(*stats));
 	stats->fw_id = -1;
@@ -1093,12 +1129,17 @@ int bnxt_qplib_alloc_stat_mem(struct pci_dev *pdev,
 	memset(stats, 0, sizeof(*stats));
 	stats->fw_id = -1;
 	stats->size = cctx->hw_stats_size;
-	stats->dma = dma_alloc_coherent(&pdev->dev, stats->size,
-					&stats->dma_map, GFP_KERNEL);
-	if (!stats->dma) {
+	stats->cpu_addr = dma_alloc_coherent(&pdev->dev, stats->size,
+					     &stats->dma_handle, GFP_KERNEL);
+	if (!stats->cpu_addr) {
 		dev_err(&pdev->dev, "QPLIB: Stats DMA allocation failed");
 		return -ENOMEM;
 	}
+
+	stats->sw_stats = kzalloc(stats->size, GFP_KERNEL);
+	if (!stats->sw_stats)
+		return -ENOMEM;
+
 	return 0;
 }
 

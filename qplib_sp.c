@@ -204,6 +204,7 @@ int bnxt_qplib_get_dev_attr(struct bnxt_qplib_rcfw *rcfw)
 
 	attr->dev_cap_ext_flags = sb->dev_cap_ext_flags;
 	attr->dev_cap_ext_flags2 = le16_to_cpu(sb->dev_cap_ext_flags_2);
+	attr->roce_cc_tlv_en_flags = le16_to_cpu(sb->roce_cc_tlv_en_flags);
 	attr->page_size_cap = BIT_ULL(28) | BIT_ULL(21) | BIT_ULL(16) | BIT_ULL(12);
 
 	bnxt_qplib_query_version(rcfw, attr->fw_ver);
@@ -820,6 +821,8 @@ static void bnxt_qplib_fill_cc_gen1(struct cmdq_modify_roce_cc_gen1_tlv *ext_req
 	ext_req->link64B_per_rtt = cpu_to_le32(cc_ext->l64B_per_rtt);
 	ext_req->cc_ack_bytes = cc_ext->cc_ack_bytes;
 	ext_req->reduce_init_cong_free_rtts_th = cpu_to_le16(cc_ext->reduce_cf_rtt_th);
+	ext_req->random_no_red_en = cc_ext->random_no_red_en;
+	ext_req->actual_cr_shift_correction_en = cc_ext->actual_cr_shift_correction_en;
 }
 
 static  void bnxt_qplib_fill_cc_gen2(struct cmdq_modify_roce_cc_gen2_tlv *ext2_req,
@@ -846,6 +849,47 @@ static  void bnxt_qplib_fill_cc_gen2(struct cmdq_modify_roce_cc_gen2_tlv *ext2_r
 	cc_ext2->ext2_mask = 0;
 	cc_ext2->dcn_qlevel_tbl_thr[cc_ext2->idx] = cc_ext2->thr;
 	cc_ext2->dcn_qlevel_tbl_act[cc_ext2->idx] = act;
+}
+
+static void bnxt_qplib_fill_cc_gen1_ext(struct cmdq_modify_roce_cc_gen1_ext_tlv *gen1_ext_req,
+					struct bnxt_qplib_cc_param_gen1_ext *cc_gen1_ext)
+{
+	gen1_ext_req->modify_mask = cpu_to_le64(cc_gen1_ext->gen1_ext_mask);
+	if (!cc_gen1_ext->gen1_ext_mask)
+		return;
+	cc_gen1_ext->gen1_ext_mask = 0;
+	gen1_ext_req->rnd_no_red_mult = cpu_to_le16(cc_gen1_ext->rnd_no_red_mult);
+	gen1_ext_req->no_red_offset = cpu_to_le16(cc_gen1_ext->no_red_offset);
+	gen1_ext_req->reduce2_init_cong_free_rtts_th =
+		cpu_to_le16(cc_gen1_ext->reduce2_init_cong_free_rtts_th);
+	gen1_ext_req->reduce2_init_en = cpu_to_le16(cc_gen1_ext->reduce2_init_en);
+	gen1_ext_req->period_adjust_count = cc_gen1_ext->period_adjust_count;
+	gen1_ext_req->current_rate_threshold_1 =
+		cpu_to_le16(cc_gen1_ext->current_rate_threshold_1);
+	gen1_ext_req->current_rate_threshold_2 =
+		cpu_to_le16(cc_gen1_ext->current_rate_threshold_2);
+	gen1_ext_req->rate_table_idx = cc_gen1_ext->rate_table_idx;
+	gen1_ext_req->rate_table_quota_period =
+		cc_gen1_ext->rate_table_quota_period[cc_gen1_ext->rate_table_idx];
+	gen1_ext_req->rate_table_byte_quota =
+		cpu_to_le16(cc_gen1_ext->rate_table_byte_quota[cc_gen1_ext->rate_table_idx]);
+}
+
+static void bnxt_qplib_fill_cc_gen2_ext(struct cmdq_modify_roce_cc_gen2_ext_tlv *gen2_ext_req,
+					struct bnxt_qplib_cc_param_gen2_ext *cc_gen2_ext)
+{
+	gen2_ext_req->modify_mask = cpu_to_le64(cc_gen2_ext->gen2_ext_mask);
+	if (!cc_gen2_ext->gen2_ext_mask)
+		return;
+	cc_gen2_ext->gen2_ext_mask = 0;
+	gen2_ext_req->cr2bw_64b_ratio = cpu_to_le16(cc_gen2_ext->cr2bw_64b_ratio);
+	gen2_ext_req->sr2_cc_actual_cr_en = cc_gen2_ext->sr2_cc_actual_cr_en;
+	gen2_ext_req->sr2_cc_first_cnp_en = cc_gen2_ext->sr2_cc_first_cnp_en;
+	gen2_ext_req->retx_cp = cpu_to_le16(cc_gen2_ext->retx_cp);
+	gen2_ext_req->retx_cr = cpu_to_le16(cc_gen2_ext->retx_cr);
+	gen2_ext_req->retx_tr = cpu_to_le16(cc_gen2_ext->retx_tr);
+	gen2_ext_req->hw_retx_cc_reset_en = cc_gen2_ext->hw_retx_cc_reset_en;
+	gen2_ext_req->hw_retx_reset_cc_cr_th = cpu_to_le16(cc_gen2_ext->hw_retx_reset_cc_cr_th);
 }
 
 int bnxt_qplib_modify_cc(struct bnxt_qplib_res *res,
@@ -890,11 +934,21 @@ int bnxt_qplib_modify_cc(struct bnxt_qplib_res *res,
 		u32 payload;
 		u32 chunks;
 		bool dcn_enabled = BNXT_RE_DCN_ENABLED(res);
+		bool gen1_ext_enabled = BNXT_RE_CC_GEN1_EXT_ENABLED(res);
+		bool gen2_ext_enabled = BNXT_RE_CC_GEN2_EXT_ENABLED(res);
 
 		cmd = &tlv_req;
 		req_size = sizeof(tlv_req);
-		if (!dcn_enabled)
-			req_size -= sizeof(struct cmdq_modify_roce_cc_gen2_tlv);
+		/* TODO Convert it to dynamic TLV arrays model */
+		if (_is_chip_gen_p5(res->cctx) ||
+		    (res->cctx->hwrm_intf_ver < HWRM_VERSION_CC_EXT)) {
+			if (!dcn_enabled)
+				req_size -= sizeof(struct cmdq_modify_roce_cc_gen2_tlv);
+			if (!gen1_ext_enabled)
+				req_size -= sizeof(struct cmdq_modify_roce_cc_gen1_ext_tlv);
+			if (!gen2_ext_enabled)
+				req_size -= sizeof(struct cmdq_modify_roce_cc_gen2_ext_tlv);
+		}
 		/* Prepare primary tlv header */
 		hdr = &tlv_req.tlv_hdr;
 		chunks = CHUNKS(req_size);
@@ -905,17 +959,31 @@ int bnxt_qplib_modify_cc(struct bnxt_qplib_res *res,
 		payload = sizeof(struct cmdq_modify_roce_cc_gen1_tlv) -
 			  sizeof(struct roce_tlv);
 		ROCE_EXT_TLV_PREP(hdr, TLV_TYPE_MODIFY_ROCE_CC_GEN1, payload,
-				  dcn_enabled, true);
+				  (dcn_enabled || gen1_ext_enabled || gen2_ext_enabled), true);
 		bnxt_qplib_fill_cc_gen1(&tlv_req.ext_req, &cc_param->cc_ext);
-		if (dcn_enabled) {
-			/* Prepare third tlv header */
-			hdr = (struct roce_tlv *)&tlv_req.ext2_req;
-			payload = sizeof(struct cmdq_modify_roce_cc_gen2_tlv) -
-				  sizeof(struct roce_tlv);
-			ROCE_EXT_TLV_PREP(hdr, TLV_TYPE_MODIFY_ROCE_CC_GEN2, payload,
-					  false, true);
-			bnxt_qplib_fill_cc_gen2(&tlv_req.ext2_req, &cc_param->cc_ext2);
-		}
+		/* Prepare third tlv header */
+		hdr = (struct roce_tlv *)&tlv_req.ext2_req;
+		payload = sizeof(struct cmdq_modify_roce_cc_gen2_tlv) -
+			  sizeof(struct roce_tlv);
+		ROCE_EXT_TLV_PREP(hdr, TLV_TYPE_MODIFY_ROCE_CC_GEN2, payload,
+				  (gen1_ext_enabled || gen2_ext_enabled), true);
+		bnxt_qplib_fill_cc_gen2(&tlv_req.ext2_req, &cc_param->cc_ext2);
+		/* Prepare fourth tlv header */
+		hdr = (struct roce_tlv *)&tlv_req.gen1_ext_req;
+		payload = sizeof(struct cmdq_modify_roce_cc_gen1_ext_tlv) -
+			  sizeof(struct roce_tlv);
+		ROCE_EXT_TLV_PREP(hdr, TLV_TYPE_MODIFY_ROCE_CC_GEN1_EXT, payload,
+				  gen2_ext_enabled, true);
+		bnxt_qplib_fill_cc_gen1_ext(&tlv_req.gen1_ext_req,
+					    &cc_param->cc_gen1_ext);
+		/* Prepare fifth tlv header */
+		hdr = (struct roce_tlv *)&tlv_req.gen2_ext_req;
+		payload = sizeof(struct cmdq_modify_roce_cc_gen2_ext_tlv) -
+			  sizeof(struct roce_tlv);
+		ROCE_EXT_TLV_PREP(hdr, TLV_TYPE_MODIFY_ROCE_CC_GEN2_EXT, payload,
+				  false, true);
+		bnxt_qplib_fill_cc_gen2_ext(&tlv_req.gen2_ext_req,
+					    &cc_param->cc_gen2_ext);
 	}
 
 	bnxt_qplib_fill_cmdqmsg(&msg, cmd, &resp, NULL, req_size,
@@ -968,6 +1036,8 @@ static void bnxt_qplib_read_cc_gen1(struct bnxt_qplib_cc_param_ext *cc_ext,
 	cc_ext->l64B_per_rtt = le32_to_cpu(sb->link64B_per_rtt);
 	cc_ext->cc_ack_bytes = sb->cc_ack_bytes;
 	cc_ext->reduce_cf_rtt_th = le16_to_cpu(sb->reduce_init_cong_free_rtts_th);
+	cc_ext->random_no_red_en = sb->random_no_red_en;
+	cc_ext->actual_cr_shift_correction_en = sb->actual_cr_shift_correction_en;
 }
 
 static void bnxt_qplib_read_cc_gen2(struct bnxt_qplib_cc_param_ext2 *cc_ext2,
@@ -981,6 +1051,38 @@ static void bnxt_qplib_read_cc_gen2(struct bnxt_qplib_cc_param_ext2 *cc_ext2,
 		cc_ext2->dcn_qlevel_tbl_thr[i] = le16_to_cpu(sb->dcn_qlevel_tbl_thr[i]);
 		cc_ext2->dcn_qlevel_tbl_act[i] = le32_to_cpu(sb->dcn_qlevel_tbl_act[i]);
 	}
+}
+
+static void bnxt_qplib_read_cc_gen1_ext(struct bnxt_qplib_cc_param_gen1_ext *cc_gen1_ext,
+					struct creq_query_roce_cc_gen1_ext_resp_sb_tlv *sb)
+{
+	int i;
+
+	cc_gen1_ext->reduce2_init_en = le16_to_cpu(sb->reduce2_init_en);
+	cc_gen1_ext->reduce2_init_cong_free_rtts_th =
+		le16_to_cpu(sb->reduce2_init_cong_free_rtts_th);
+	cc_gen1_ext->rnd_no_red_mult = le16_to_cpu(sb->rnd_no_red_mult);
+	cc_gen1_ext->no_red_offset = le16_to_cpu(sb->no_red_offset);
+	for (i = 0; i < 24; i++) {
+		cc_gen1_ext->rate_table_byte_quota[i] = le16_to_cpu(sb->rate_table_byte_quota[i]);
+		cc_gen1_ext->rate_table_quota_period[i] = sb->rate_table_quota_period[i];
+	}
+	cc_gen1_ext->period_adjust_count = sb->period_adjust_count;
+	cc_gen1_ext->current_rate_threshold_1 = le16_to_cpu(sb->current_rate_threshold_1);
+	cc_gen1_ext->current_rate_threshold_2 = le16_to_cpu(sb->current_rate_threshold_2);
+}
+
+static void bnxt_qplib_read_cc_gen2_ext(struct bnxt_qplib_cc_param_gen2_ext *cc_gen2_ext,
+					struct creq_query_roce_cc_gen2_ext_resp_sb_tlv *sb)
+{
+	cc_gen2_ext->cr2bw_64b_ratio = le16_to_cpu(sb->cr2bw_64b_ratio);
+	cc_gen2_ext->sr2_cc_first_cnp_en = sb->sr2_cc_first_cnp_en;
+	cc_gen2_ext->sr2_cc_actual_cr_en = sb->sr2_cc_actual_cr_en;
+	cc_gen2_ext->retx_cr = le16_to_cpu(sb->retx_cr);
+	cc_gen2_ext->retx_tr = le16_to_cpu(sb->retx_tr);
+	cc_gen2_ext->retx_cp = le16_to_cpu(sb->retx_cp);
+	cc_gen2_ext->hw_retx_cc_reset_en = le16_to_cpu(sb->hw_retx_cc_reset_en);
+	cc_gen2_ext->hw_retx_reset_cc_cr_th = le16_to_cpu(sb->hw_retx_reset_cc_cr_th);
 }
 
 int bnxt_qplib_query_cc_param(struct bnxt_qplib_res *res,
@@ -1001,8 +1103,16 @@ int bnxt_qplib_query_cc_param(struct bnxt_qplib_res *res,
 				 sizeof(req));
 	if (_is_chip_gen_p5_p7(res->cctx)) {
 		resp_size = sizeof(*ext_sb);
-		if (!BNXT_RE_DCN_ENABLED(res))
-			resp_size -= sizeof(ext_sb->gen2_sb);
+		/* TODO Convert it to dynamic TLV arrays model */
+		if (_is_chip_gen_p5(res->cctx) ||
+		    (res->cctx->hwrm_intf_ver < HWRM_VERSION_CC_EXT)) {
+			if (!BNXT_RE_DCN_ENABLED(res))
+				resp_size -= sizeof(ext_sb->gen2_sb);
+			if (!BNXT_RE_CC_GEN1_EXT_ENABLED(res))
+				resp_size -= sizeof(ext_sb->gen1_ext_sb);
+			if (!BNXT_RE_CC_GEN2_EXT_ENABLED(res))
+				resp_size -= sizeof(ext_sb->gen2_ext_sb);
+		}
 	} else {
 		resp_size = sizeof(*sb);
 	}
@@ -1048,9 +1158,16 @@ int bnxt_qplib_query_cc_param(struct bnxt_qplib_res *res,
 	cc_param->pkts_pph = sb->pkts_per_phase;
 	if (_is_chip_gen_p5_p7(res->cctx)) {
 		bnxt_qplib_read_cc_gen1(&cc_param->cc_ext, &ext_sb->gen1_sb);
+		cc_param->inact_th |= (cc_param->cc_ext.inact_th_hi & 0x3F) << 16;
 		if (BNXT_RE_DCN_ENABLED(res))
 			bnxt_qplib_read_cc_gen2(&cc_param->cc_ext2,
 						&ext_sb->gen2_sb);
+		if (BNXT_RE_CC_GEN1_EXT_ENABLED(res))
+			bnxt_qplib_read_cc_gen1_ext(&cc_param->cc_gen1_ext,
+						    &ext_sb->gen1_ext_sb);
+		if (BNXT_RE_CC_GEN2_EXT_ENABLED(res))
+			bnxt_qplib_read_cc_gen2_ext(&cc_param->cc_gen2_ext,
+						    &ext_sb->gen2_ext_sb);
 	}
 out:
 	dma_free_coherent(&rcfw->pdev->dev, sbuf.size,
@@ -1323,6 +1440,11 @@ int bnxt_qplib_qext_stat(struct bnxt_qplib_rcfw *rcfw, u32 fid,
 	estat->dup_req = le64_to_cpu(sb->dup_req);
 	estat->rx_dcn_payload_cut = le64_to_cpu(sb->rx_dcn_payload_cut);
 	estat->te_bypassed = le64_to_cpu(sb->te_bypassed);
+	estat->tx_dcn_cnp = le64_to_cpu(sb->tx_dcn_cnp);
+	estat->rx_dcn_cnp = le64_to_cpu(sb->rx_dcn_cnp);
+	estat->rx_payload_cut = le64_to_cpu(sb->rx_payload_cut);
+	estat->rx_payload_cut_ignored = le64_to_cpu(sb->rx_payload_cut_ignored);
+	estat->rx_dcn_cnp_ignored = le64_to_cpu(sb->rx_dcn_cnp_ignored);
 bail:
 	dma_free_coherent(&rcfw->pdev->dev, sbuf.size,
 				  sbuf.sb, sbuf.dma_addr);

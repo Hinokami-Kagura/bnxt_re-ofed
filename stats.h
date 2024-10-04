@@ -87,6 +87,11 @@ struct bnxt_re_ext_rstat {
 	struct bnxt_re_ext_good	grx;
 	u64  rx_dcn_payload_cut;
 	u64  te_bypassed;
+	u64  tx_dcn_cnp;
+	u64  rx_dcn_cnp;
+	u64  rx_payload_cut;
+	u64  rx_payload_cut_ignored;
+	u64  rx_dcn_cnp_ignored;
 };
 
 struct bnxt_re_rdata_counters {
@@ -145,6 +150,7 @@ struct bnxt_re_res_cntrs {
 	atomic_t cq_count;
 	atomic_t srq_count;
 	atomic_t mr_count;
+	atomic_t mr_dmabuf_count;
 	atomic_t mw_count;
 	atomic_t ah_count;
 	atomic_t pd_count;
@@ -155,6 +161,7 @@ struct bnxt_re_res_cntrs {
 	atomic_t max_cq_count;
 	atomic_t max_srq_count;
 	atomic_t max_mr_count;
+	atomic_t max_mr_dmabuf_count;
 	atomic_t max_mw_count;
 	atomic_t max_ah_count;
 	atomic_t max_pd_count;
@@ -211,6 +218,7 @@ static inline void bnxt_re_clear_rsors_stat(struct bnxt_re_res_cntrs *rsors)
 	atomic_set(&rsors->cq_count, 0);
 	atomic_set(&rsors->srq_count, 0);
 	atomic_set(&rsors->mr_count, 0);
+	atomic_set(&rsors->mr_dmabuf_count, 0);
 	atomic_set(&rsors->mw_count, 0);
 	atomic_set(&rsors->ah_count, 0);
 	atomic_set(&rsors->pd_count, 0);
@@ -219,6 +227,7 @@ static inline void bnxt_re_clear_rsors_stat(struct bnxt_re_res_cntrs *rsors)
 	atomic_set(&rsors->max_cq_count, 0);
 	atomic_set(&rsors->max_srq_count, 0);
 	atomic_set(&rsors->max_mr_count, 0);
+	atomic_set(&rsors->max_mr_dmabuf_count, 0);
 	atomic_set(&rsors->max_mw_count, 0);
 	atomic_set(&rsors->max_ah_count, 0);
 	atomic_set(&rsors->max_pd_count, 0);
@@ -228,4 +237,5 @@ static inline void bnxt_re_clear_rsors_stat(struct bnxt_re_res_cntrs *rsors)
 
 int bnxt_re_get_device_stats(struct bnxt_re_dev *rdev);
 int bnxt_re_get_qos_stats(struct bnxt_re_dev *rdev);
+void bnxt_re_get_roce_data_stats(struct bnxt_re_dev *rdev);
 #endif /* __STATS_H__ */

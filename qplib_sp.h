@@ -92,9 +92,13 @@
 	((ui) ? ((*(act)) | MODIFY_DCN_QT_ACT_UPD_IMM) : ((*(act)) & ~MODIFY_DCN_QT_ACT_UPD_IMM))
 
 #define BNXT_RE_DCN_ENABLED(res) \
-	(_is_chip_p7((res)->cctx) && \
-	 (((res)->dattr->dev_cap_flags & CREQ_QUERY_FUNC_RESP_SB_CC_GENERATION_MASK) ==\
-	  CREQ_QUERY_FUNC_RESP_SB_CC_GENERATION_CC_GEN2))
+	((res)->dattr->roce_cc_tlv_en_flags & CREQ_QUERY_FUNC_RESP_SB_ROCE_CC_GEN2_TLV_EN)
+
+#define BNXT_RE_CC_GEN1_EXT_ENABLED(res) \
+	((res)->dattr->roce_cc_tlv_en_flags & CREQ_QUERY_FUNC_RESP_SB_ROCE_CC_GEN1_EXT_TLV_EN)
+
+#define BNXT_RE_CC_GEN2_EXT_ENABLED(res) \
+	((res)->dattr->roce_cc_tlv_en_flags & CREQ_QUERY_FUNC_RESP_SB_ROCE_CC_GEN2_EXT_TLV_EN)
 
 /* Resource maximums reported by the firmware */
 struct bnxt_qplib_dev_attr {
@@ -134,6 +138,7 @@ struct bnxt_qplib_dev_attr {
 	u8				is_atomic;
 	u8				dev_cap_ext_flags;
 	u16				dev_cap_ext_flags2;
+	u16				roce_cc_tlv_en_flags;
 	u16				dev_cap_flags;
 	u64				page_size_cap;
 	u32				max_dpi;
@@ -241,6 +246,8 @@ struct bnxt_qplib_cc_param_ext {
 	u32 l64B_per_rtt;
 	u8 cc_ack_bytes;
 	u16 reduce_cf_rtt_th;
+	u8 random_no_red_en;
+	u8 actual_cr_shift_correction_en;
 };
 
 struct bnxt_qplib_cc_param_ext2 {
@@ -255,6 +262,32 @@ struct bnxt_qplib_cc_param_ext2 {
 	u32 dcn_qlevel_tbl_act[8];
 };
 
+struct bnxt_qplib_cc_param_gen1_ext {
+	u64 gen1_ext_mask;
+	u16 rnd_no_red_mult;
+	u16 no_red_offset;
+	u16 reduce2_init_cong_free_rtts_th;
+	u8 reduce2_init_en;
+	u8 period_adjust_count;
+	u16 current_rate_threshold_1;
+	u16 current_rate_threshold_2;
+	u8 rate_table_idx;
+	u16 rate_table_byte_quota[24];
+	u8 rate_table_quota_period[24];
+};
+
+struct bnxt_qplib_cc_param_gen2_ext {
+	u64 gen2_ext_mask;
+	u16 cr2bw_64b_ratio;
+	u8 sr2_cc_first_cnp_en;
+	u8 sr2_cc_actual_cr_en;
+	u16 retx_cp;
+	u16 retx_tr;
+	u16 retx_cr;
+	u8 hw_retx_cc_reset_en;
+	u16 hw_retx_reset_cc_cr_th;
+};
+
 struct bnxt_qplib_cc_param {
 	u8 alt_vlan_pcp;
 	u16 alt_tos_dscp;
@@ -264,7 +297,7 @@ struct bnxt_qplib_cc_param {
 	u8 cc_mode;
 	u8 enable;
 	u8 disable_prio_vlan_tx;
-	u16 inact_th;
+	u32 inact_th;
 	u16 init_cr;
 	u16 init_tr;
 	u16 rtt;
@@ -292,6 +325,8 @@ struct bnxt_qplib_cc_param {
 	u16 tcp_cp;
 	struct bnxt_qplib_cc_param_ext cc_ext;
 	struct bnxt_qplib_cc_param_ext2 cc_ext2;
+	struct bnxt_qplib_cc_param_gen1_ext cc_gen1_ext;
+	struct bnxt_qplib_cc_param_gen2_ext cc_gen2_ext;
 };
 
 struct bnxt_qplib_roce_stats {
@@ -412,6 +447,11 @@ struct bnxt_qplib_ext_stat {
 	u64  dup_req;
 	u64  rx_dcn_payload_cut;
 	u64  te_bypassed;
+	u64  tx_dcn_cnp;
+	u64  rx_dcn_cnp;
+	u64  rx_payload_cut;
+	u64  rx_payload_cut_ignored;
+	u64  rx_dcn_cnp_ignored;
 };
 
 #define BNXT_QPLIB_ACCESS_LOCAL_WRITE	(1 << 0)

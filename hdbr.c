@@ -138,7 +138,8 @@ static void hdbr_dealloc_page(struct bnxt_re_dev *rdev, struct hdbr_pg *pg, int 
 		return;
 	}
 	/* Unregister this page from main kernel table in L2 driver */
-	bnxt_hdbr_unreg_apg(ktbl, pg->ktbl_idx);
+	if (!test_bit(BNXT_RE_FLAG_ERR_DEVICE_DETACHED, &rdev->flags))
+		bnxt_hdbr_unreg_apg(ktbl, pg->ktbl_idx);
 
 	/* Free page and structure memory in background */
 	wk = kzalloc(sizeof(*wk), GFP_ATOMIC);

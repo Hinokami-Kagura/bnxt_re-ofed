@@ -83,31 +83,41 @@ ifeq ($(BCMMODDIR),)
   endif
 endif
 
+ifeq ($(shell type ofed_info >/dev/null 2>&1 && echo 1),1)
+ifneq ($(shell ls /usr/src/ofa_kernel/x86_64 | grep -s $(KVER)),)
+OFED_VERSION=$(shell ofed_info | grep -oP '(?<=OFED-|OFED-internal-)[0-9]+\.[0-9]+' | sort | uniq)
+endif
+endif
+
 ifeq ($(OFED_VERSION), )
      $(warning Using native IB stack)
      OFED_VERSION=OFED-NATIVE
 endif
 
-#find OFED version and compat-includes
-ofed_major=$(filter OFED-3.% OFED-4.%, $(OFED_VERSION))
-ifneq ($(ofed_major), )
-exists=$(shell if [ -e /usr/src/compat-rdma$(OFED_VERSION) ];\
-                then echo y; fi)
-ifeq ($(exists), )
-$(shell ln -s /usr/src/compat-rdma\
-         /usr/src/compat-rdma$(OFED_VERSION))
+ifneq (OFED-NATIVE, $(findstring OFED-NATIVE, $(OFED_VERSION)))
+$(warning Using OFED version $(OFED_VERSION))
+OFA_BUILD_PATH=/usr/src/ofa_kernel/x86_64/$(KVER)
+OFA_KERNEL_PATH=/usr/src/ofa_kernel/x86_64/$(KVER)
+ofed_5_x=$(filter 5.%, $(OFED_VERSION))
+ifneq ($(ofed_5_x), )
+EXTRA_CFLAGS += -DOFED_5_x
 endif
-OFA_BUILD_PATH=/usr/src/compat-rdma$(OFED_VERSION)
-OFA_KERNEL_PATH=/usr/src/compat-rdma$(OFED_VERSION)
-EXTRA_CFLAGS += -DOFED_3_x
-ofed_4_17_x=$(filter OFED-4.17%, $(ofed_major))
-ifneq ($(ofed_4_17_x), )
 EXTRA_CFLAGS += -D__OFED_BUILD__
-endif
 EXTRA_CFLAGS += -include $(OFA_KERNEL_PATH)/include/linux/compat-2.6.h
 
-AUTOCONF_H = -include $(shell /bin/ls -1 $(LINUX)/include/*/autoconf.h 2> /dev/null | head -1)
-endif #end non 3.x OFED
+autoconf_h = $(shell /bin/ls -1 $(LINUX)/include/*/autoconf.h 2> /dev/null | head -1)
+kconfig_h=$(shell /bin/ls -1 $(LINUX)/include/*/kconfig.h 2> /dev/null | head -1)
+
+ifneq ($(autoconf_h),)
+AUTOCONF_H = -include $(autoconf_h)
+endif
+
+ifneq ($(kconfig_h),)
+KCONFIG_H = -include $(kconfig_h)
+endif
+
+EXTRA_CFLAGS += -DHAVE_EXTERNAL_OFED
+endif
 
 ifeq (OFED-NATIVE, $(findstring OFED-NATIVE, $(OFED_VERSION)))
 OFA_KERNEL_PATH=$(LINUXSRC)
@@ -162,11 +172,11 @@ ifneq ($(shell grep "rereg_user_mr" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h >
   DISTRO_CFLAG += -DHAVE_IB_REREG_USER_MR
 endif
 
-ifneq ($(shell grep "fill_res_mr_entry" $(LINUXSRC)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fill_res_mr_entry),)
+ifneq ($(shell grep "fill_res_mr_entry" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fill_res_mr_entry),)
   DISTRO_CFLAG += -DHAVE_RDMA_RESTRACK_OPS
-  ifneq ($(shell grep "fill_res_srq_entry" $(LINUXSRC)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fill_res_srq_entry),)
+  ifneq ($(shell grep "fill_res_srq_entry" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fill_res_srq_entry),)
     DISTRO_CFLAG += -DHAVE_IB_RES_SRQ_ENTRY
-    ifneq ($(shell grep "fill_res_srq_entry_raw" $(LINUXSRC)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fill_res_srq_entry_raw),)
+    ifneq ($(shell grep "fill_res_srq_entry_raw" $(OFA_KERNEL_PATH)/include/rdma/ib_verbs.h > /dev/null 2>&1 && echo fill_res_srq_entry_raw),)
       DISTRO_CFLAG += -DHAVE_IB_RES_SRQ_ENTRY_RAW
     endif
   endif
@@ -466,6 +476,10 @@ ifneq ($(shell grep -o "NETDEV_BONDING_FAILOVER" $(LINUXSRC)/include/linux/netde
   endif
 endif
 
+ifneq ($(shell grep -o "NETDEV_BONDING_INFO" $(LINUXSRC)/include/linux/netdevice.h),)
+  DISTRO_CFLAG += -DHAVE_NETDEV_BONDING_INFO
+endif
+
 ifneq ($(BNXT_PEER_MEM_INC),)
       export BNXT_PEER_MEM_INC
       ifneq ($(shell grep -o "ib_umem_get_flags" $(BNXT_PEER_MEM_INC)/peer_umem.h),)
@@ -550,6 +564,10 @@ endif
 
 ifneq ($(shell grep "for_each_sg_dma_page" $(LINUXSRC)/include/linux/scatterlist.h),)
   DISTRO_CFLAG += -DHAVE_FOR_EACH_SG_DMA_PAGE
+endif
+
+ifneq ($(shell grep "sg_append_table" $(LINUXSRC)/include/linux/scatterlist.h),)
+  DISTRO_CFLAG += -DHAS_SG_APPEND_TABLE
 endif
 
 ifneq ($(shell grep "has_secondary_link" $(LINUXSRC)/include/linux/pci.h),)
@@ -730,21 +748,19 @@ ifneq ($(shell grep -so "ida_alloc" $(LINUXSRC)/include/linux/idr.h),)
   DISTRO_CFLAG += -DHAVE_IDA_ALLOC
 endif
 
-ifneq ($(shell grep -o "struct auxiliary_device_id" $(LINUXSRC)/include/linux/mod_devicetable.h),)
+ifneq ($(shell grep -o "struct auxiliary_device_id" $(OFA_KERNEL_PATH)/include/linux/mod_devicetable.h),)
   DISTRO_CFLAG += -DHAVE_AUX_DEVICE_ID
 endif
 
-ifneq ($(shell ls $(LINUXSRC)/include/linux/auxiliary_bus.h > /dev/null 2>&1 && echo auxiliary_driver),)
-  ifneq ($(CONFIG_AUXILIARY_BUS),)
-    DISTRO_CFLAG += -DHAVE_AUXILIARY_DRIVER
-  endif
+ifneq ($(shell ls $(OFA_KERNEL_PATH)/include/linux/auxiliary_bus.h > /dev/null 2>&1 && echo auxiliary_driver),)
+  DISTRO_CFLAG += -DHAVE_AUXILIARY_DRIVER
 endif
 
-ifneq ($(shell grep -so "auxiliary_get_drvdata" $(LINUXSRC)/include/linux/auxiliary_bus.h),)
+ifneq ($(shell grep -so "auxiliary_get_drvdata" $(OFA_KERNEL_PATH)/include/linux/auxiliary_bus.h),)
   DISTRO_CFLAG += -DHAVE_AUX_GET_DRVDATA
 endif
 
-ifneq ($(shell grep -sw "(\*remove)"  $(LINUXSRC)/include/linux/auxiliary_bus.h | grep -o "int"),)
+ifneq ($(shell grep -sw "(\*remove)"  $(OFA_KERNEL_PATH)/include/linux/auxiliary_bus.h | grep -o "int"),)
   DISTRO_CFLAG += -DHAVE_AUDEV_REM_RET_INT
 endif
 
@@ -783,8 +799,10 @@ KSRC=$(LINUXSRC)
 ifneq (OFED-NATIVE, $(findstring OFED-NATIVE, $(OFED_VERSION)))
 OFED_INCLUDES := LINUXINCLUDE=' \
                 $(AUTOCONF_H) \
+                $(KCONFIG_H) \
                 -I$(OFA_KERNEL_PATH)/include \
                 -I$(OFA_KERNEL_PATH)/include/uapi \
+                -I$(OFA_KERNEL_PATH)/include/linux \
 		 $$(if $$(CONFIG_XEN),-D__XEN_INTERFACE_VERSION__=$$(CONFIG_XEN_INTERFACE_VERSION)) \
 		 $$(if $$(CONFIG_XEN),-I$$(KSRC)/arch/x86/include/mach-xen) \
                 -I$(OFA_KERNEL_PATH)/arch/$$(SRCARCH)/include/generated/uapi \
@@ -814,7 +832,7 @@ bnxt_re-y := main.o ib_verbs.o		\
 	     debugfs.o compat.o		\
 	     qplib_res.o qplib_rcfw.o	\
 	     qplib_sp.o qplib_fp.o	\
-	     stats.o dcb.o hdbr.o	\
+	     stats.o hdbr.o	\
 	     hw_counters.o
 
 bnxt_re-$(HAVE_CONFIGFS_ENABLED) += configfs.o
@@ -838,6 +856,9 @@ install: default
 	echo $(BCM_DRV)
 	mkdir -p $(PREFIX)/$(BCMMODDIR);
 	install -m 444 $(BCM_DRV) $(PREFIX)/$(BCMMODDIR);
+	@if [ "$$OFED_VERSION" != "OFED-NATIVE" ] && ls /etc/depmod.d/*-mlnx-ofa_kernel-bnxt_re.conf 1> /dev/null 2>&1; then\
+		echo 'override bnxt_re * updates/drivers/infiniband/hw/bnxt_re' > /etc/depmod.d/zzz99-bcm-bnxt_re.conf;\
+	fi;
 	@if [ "$(PREFIX)" = "" ]; then /sbin/depmod -a ;\
 	else echo " *** Run '/sbin/depmod -a' to update the module database.";\
 	fi

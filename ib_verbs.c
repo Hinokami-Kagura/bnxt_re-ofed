@@ -1523,13 +1523,18 @@ int bnxt_re_query_ah(struct ib_ah *ib_ah, RDMA_AH_ATTR *ah_attr)
 	return 0;
 }
 
-static void bnxt_re_save_resource_context(struct bnxt_re_dev *rdev,
-					  u32 xid, u8 res_type)
+static void bnxt_re_save_resource_context(struct bnxt_re_dev *rdev, u32 xid,
+					  u8 res_type, bool capture_snapdump)
 {
 	void *drv_ctx_data, *fw_resp_data;
 	u32 *ctx_index;
 	u32 ctx_size;
 	int rc;
+
+	if (rdev->snapdump_dbg_lvl == BNXT_RE_SNAPDUMP_NONE)
+		return;
+	if (rdev->snapdump_dbg_lvl == BNXT_RE_SNAPDUMP_ERR && !capture_snapdump)
+		return;
 
 	rc = bnxt_re_read_context_allowed(rdev);
 	if (rc)
@@ -1589,8 +1594,9 @@ DESTROY_SRQ_RET bnxt_re_destroy_srq(struct ib_srq *ib_srq
 	struct bnxt_re_dev *rdev = srq->rdev;
 	struct bnxt_qplib_srq *qplib_srq = &srq->qplib_srq;
 	int rc = 0;
+	bool capture_snapdump;
 
-	BNXT_RE_DBR_LIST_DEL(rdev, srq, BNXT_RE_RES_TYPE_SRQ);
+	BNXT_RE_RES_LIST_DEL(rdev, srq, BNXT_RE_RES_TYPE_SRQ);
 
 	if (srq->uctx_srq_page) {
 		BNXT_RE_SRQ_PAGE_LIST_DEL(srq->uctx, srq);
@@ -1601,8 +1607,10 @@ DESTROY_SRQ_RET bnxt_re_destroy_srq(struct ib_srq *ib_srq
 	if (rdev->hdbr_enabled)
 		bnxt_re_hdbr_db_unreg_srq(rdev, srq);
 
+	capture_snapdump = test_bit(SRQ_FLAGS_CAPTURE_SNAPDUMP, &qplib_srq->flags);
+
 	bnxt_re_save_resource_context(rdev, cpu_to_le32(qplib_srq->id),
-				      CMDQ_READ_CONTEXT_TYPE_SRQ);
+				      CMDQ_READ_CONTEXT_TYPE_SRQ, capture_snapdump);
 
 	rc = bnxt_qplib_destroy_srq(&rdev->qplib_res, qplib_srq);
 	if (rc)
@@ -1610,8 +1618,10 @@ DESTROY_SRQ_RET bnxt_re_destroy_srq(struct ib_srq *ib_srq
 				   "%s id = %d failed rc = %d",
 				    __func__, qplib_srq->id, rc);
 
-	if (srq->umem && !IS_ERR(srq->umem))
-		ib_umem_release(srq->umem);
+	bnxt_re_umem_free(&srq->umem);
+	bnxt_re_umem_free(&srq->qplib_srq.srqprod);
+	bnxt_re_umem_free(&srq->qplib_srq.srqcons);
+
 	/* TODO: Must free the actual SRQ DMA memory */
 
 	atomic_dec(&rdev->stats.rsors.srq_count);
@@ -1650,10 +1660,10 @@ static int bnxt_re_init_user_srq(struct bnxt_re_dev *rdev,
 				 struct ib_udata *udata)
 {
 	struct bnxt_qplib_sg_info *sginfo;
+	struct bnxt_re_srq_req ureq = {};
 	struct bnxt_qplib_srq *qplib_srq;
 	struct bnxt_re_ucontext *cntx;
 	struct ib_ucontext *context;
-	struct bnxt_re_srq_req ureq;
 	struct ib_umem *umem;
 	int rc, bytes = 0;
 
@@ -1694,6 +1704,14 @@ static int bnxt_re_init_user_srq(struct bnxt_re_dev *rdev,
 	qplib_srq->dpi = &cntx->dpi;
 	qplib_srq->is_user = true;
 
+	if (ureq.srqprodva)
+		qplib_srq->srqprod = ib_umem_get_compat(rdev, context, udata,
+							ureq.srqprodva, sizeof(u32),
+							IB_ACCESS_LOCAL_WRITE, 1);
+	if (ureq.srqconsva)
+		qplib_srq->srqcons = ib_umem_get_compat(rdev, context, udata,
+							ureq.srqconsva, sizeof(u32),
+							IB_ACCESS_LOCAL_WRITE, 1);
 	return 0;
 }
 
@@ -1822,7 +1840,7 @@ CREATE_SRQ_RET bnxt_re_create_srq(CREATE_SRQ_IN *srq_in,
 		atomic_set(&rdev->stats.rsors.max_srq_count, max_srq_count);
 	spin_lock_init(&srq->lock);
 
-	BNXT_RE_DBR_LIST_ADD(rdev, srq, BNXT_RE_RES_TYPE_SRQ);
+	BNXT_RE_RES_LIST_ADD(rdev, srq, BNXT_RE_RES_TYPE_SRQ);
 #ifndef HAVE_SRQ_CREATE_IN_IB_CORE
 	return &srq->ib_srq;
 #else
@@ -1837,9 +1855,10 @@ srq_page_fail:
 db_reg_fail:
 	bnxt_qplib_destroy_srq(&rdev->qplib_res, &srq->qplib_srq);
 fail:
-	if (udata && srq->umem && !IS_ERR(srq->umem)) {
-		ib_umem_release(srq->umem);
-		srq->umem = NULL;
+	if (udata) {
+		bnxt_re_umem_free(&srq->umem);
+		bnxt_re_umem_free(&srq->qplib_srq.srqprod);
+		bnxt_re_umem_free(&srq->qplib_srq.srqcons);
 	}
 #ifndef HAVE_SRQ_CREATE_IN_IB_CORE
 	kfree(srq);
@@ -2108,6 +2127,16 @@ static void bnxt_re_copy_qdump_pbl(struct qdump_element *element)
 	}
 }
 
+static void bnxt_re_copy_usrmem(struct ib_umem *umem, void *dest, u32 len)
+{
+	memset(dest, 0, len);
+
+	if (IS_ERR_OR_NULL(umem))
+		return;
+
+	ib_umem_copy_from(dest, umem, 0, len);
+}
+
 static int bnxt_re_alloc_qdump_element(struct qdump_element *element,
 				       u16 stride, const char *des)
 {
@@ -2126,8 +2155,13 @@ static int bnxt_re_alloc_qdump_element(struct qdump_element *element,
 
 	strscpy(element->des, des, sizeof(element->des));
 	element->stride = stride;
-	element->prod = element->hwq->prod;
-	element->cons = element->hwq->cons;
+	if (element->is_user_qp) {
+		bnxt_re_copy_usrmem(element->uaddr_prod, &element->prod, sizeof(u32));
+		bnxt_re_copy_usrmem(element->uaddr_cons, &element->cons, sizeof(u32));
+	} else {
+		element->prod = element->hwq->prod;
+		element->cons = element->hwq->cons;
+	}
 
 	bnxt_re_copy_qdump_pbl(element);
 
@@ -2174,6 +2208,15 @@ int bnxt_re_capture_qpdump(struct bnxt_re_qp *qp)
 	struct qdump_qpinfo *qpinfo;
 	struct qdump_array *qdump;
 	struct bnxt_re_srq *srq;
+	bool capture_snapdump;
+
+	if (rdev->snapdump_dbg_lvl == BNXT_RE_SNAPDUMP_NONE)
+		return 0;
+
+	capture_snapdump = test_bit(QP_FLAGS_CAPTURE_SNAPDUMP, &qpl->flags);
+	if ((rdev->snapdump_dbg_lvl == BNXT_RE_SNAPDUMP_ERR) &&
+	    !capture_snapdump)
+		return 0;
 
 	if (qp->is_snapdump_captured || !rdev->qdump_head.qdump)
 		return 0;
@@ -2199,45 +2242,59 @@ int bnxt_re_capture_qpdump(struct bnxt_re_qp *qp)
 	qpinfo->scq_id = qp->scq->qplib_cq.id;
 	qpinfo->rcq_id = qp->rcq->qplib_cq.id;
 
+	qdump->sqd.rdev = rdev;
 	qdump->sqd.umem = qp->sumem;
 	qdump->sqd.hwq = &qpl->sq.hwq;
 	qdump->sqd.is_user_qp = qpl->is_user;
 	qdump->sqd.len = (qpl->sq.max_wqe * qpl->sq.wqe_size);
+	qdump->sqd.uaddr_prod = qp->sqprod;
+	qdump->sqd.uaddr_cons = qp->sqcons;
 	bnxt_re_alloc_qdump_element(&qdump->sqd, sizeof(struct sq_sge),
 				    "SendQueue");
-
 	if (qp->qplib_qp.srq) {
 		srq = container_of(qp->qplib_qp.srq, struct bnxt_re_srq, qplib_srq);
+		qdump->rqd.rdev = rdev;
 		qdump->rqd.umem = srq->umem;
 		qdump->rqd.hwq = &((qp->qplib_qp.srq)->hwq);
 		qdump->rqd.is_user_qp = qpl->is_user;
 		qdump->rqd.len = (qp->qplib_qp.srq->wqe_size * qp->qplib_qp.srq->max_wqe);
+		qdump->rqd.uaddr_prod = qp->qplib_qp.srq->srqprod;
+		qdump->rqd.uaddr_cons = qp->qplib_qp.srq->srqcons;
 		bnxt_re_alloc_qdump_element(&qdump->rqd, sizeof(struct sq_sge),
 					    "SharedRecvQueue");
 	} else {
+		qdump->rqd.rdev = rdev;
 		qdump->rqd.umem = qp->rumem;
 		qdump->rqd.hwq = &qpl->rq.hwq;
 		qdump->rqd.is_user_qp = qpl->is_user;
 		qdump->rqd.len = (qpl->rq.max_wqe * qpl->rq.wqe_size);
+		qdump->rqd.uaddr_prod = qp->rqprod;
+		qdump->rqd.uaddr_cons = qp->rqcons;
 		bnxt_re_alloc_qdump_element(&qdump->rqd, sizeof(struct sq_sge),
 					    "RecvQueue");
 	}
 
 	if (!qp->scq->is_snapdump_captured) {
+		qdump->scqd.rdev = rdev;
 		qdump->scqd.umem = qp->scq->umem;
 		qdump->scqd.hwq = &qp->scq->qplib_cq.hwq;
 		qdump->scqd.is_user_qp = qpl->is_user;
 		qdump->scqd.len = (qpl->scq->max_wqe * sizeof(struct cq_base));
+		qdump->scqd.uaddr_prod = qp->scq->cqprod;
+		qdump->scqd.uaddr_cons = qp->scq->cqcons;
 		bnxt_re_alloc_qdump_element(&qdump->scqd, sizeof(struct cq_base),
 					    "SendCompQueue");
 		qp->scq->is_snapdump_captured = true;
 	}
 
 	if (!qp->rcq->is_snapdump_captured) {
+		qdump->rcqd.rdev = rdev;
 		qdump->rcqd.umem = qp->rcq->umem;
 		qdump->rcqd.hwq = &qp->rcq->qplib_cq.hwq;
 		qdump->rcqd.is_user_qp = qpl->is_user;
 		qdump->rcqd.len = (qpl->rcq->max_wqe * sizeof(struct cq_base));
+		qdump->rcqd.uaddr_prod = qp->rcq->cqprod;
+		qdump->rcqd.uaddr_cons = qp->rcq->cqcons;
 		bnxt_re_alloc_qdump_element(&qdump->rcqd, sizeof(struct cq_base),
 					    "RecvCompQueue");
 		qp->rcq->is_snapdump_captured = true;
@@ -2261,6 +2318,7 @@ int bnxt_re_destroy_qp(struct ib_qp *ib_qp
 	struct bnxt_re_dev *rdev = qp->rdev;
 	struct bnxt_qplib_nq *scq_nq = NULL;
 	struct bnxt_qplib_nq *rcq_nq = NULL;
+	bool capture_snapdump;
 	unsigned long flags;
 	u32 active_qps;
 	int rc;
@@ -2268,7 +2326,7 @@ int bnxt_re_destroy_qp(struct ib_qp *ib_qp
 	mutex_lock(&rdev->qp_lock);
 	bnxt_re_capture_qpdump(qp);
 	list_del(&qp->list);
-	BNXT_RE_DBR_LIST_DEL(rdev, qp, BNXT_RE_RES_TYPE_QP);
+	BNXT_RE_RES_LIST_DEL(rdev, qp, BNXT_RE_RES_TYPE_QP);
 	active_qps = atomic_dec_return(&rdev->stats.rsors.qp_count);
 	if (qp->qplib_qp.type == CMDQ_CREATE_QP_TYPE_RC)
 		atomic_dec(&rdev->stats.rsors.rc_qp_count);
@@ -2286,8 +2344,9 @@ int bnxt_re_destroy_qp(struct ib_qp *ib_qp
 	if (!ib_qp->uobject)
 		bnxt_qplib_flush_cqn_wq(&qp->qplib_qp);
 
+	capture_snapdump = test_bit(QP_FLAGS_CAPTURE_SNAPDUMP, &qplib_qp->flags);
 	bnxt_re_save_resource_context(rdev, cpu_to_le32(qplib_qp->id),
-				      CMDQ_READ_CONTEXT_TYPE_QPC);
+				      CMDQ_READ_CONTEXT_TYPE_QPC, capture_snapdump);
 
 	rc = bnxt_qplib_destroy_qp(&rdev->qplib_res, &qp->qplib_qp);
 	if (rc)
@@ -2311,10 +2370,12 @@ int bnxt_re_destroy_qp(struct ib_qp *ib_qp
 		bnxt_qplib_free_hdr_buf(&rdev->qplib_res, &qp->qplib_qp);
 	}
 
-	if (qp->rumem && !IS_ERR(qp->rumem))
-		ib_umem_release(qp->rumem);
-	if (qp->sumem && !IS_ERR(qp->sumem))
-		ib_umem_release(qp->sumem);
+	bnxt_re_umem_free(&qp->rumem);
+	bnxt_re_umem_free(&qp->sumem);
+	bnxt_re_umem_free(&qp->sqprod);
+	bnxt_re_umem_free(&qp->sqcons);
+	bnxt_re_umem_free(&qp->rqprod);
+	bnxt_re_umem_free(&qp->rqcons);
 
 	/* Flush all the entries of notification queue associated with
 	 * given qp.
@@ -2416,10 +2477,10 @@ static int bnxt_re_init_user_qp(struct bnxt_re_dev *rdev,
 				struct ib_udata *udata)
 {
 	struct bnxt_qplib_sg_info *sginfo;
+	struct bnxt_re_qp_req ureq = {};
 	struct bnxt_qplib_qp *qplib_qp;
 	struct bnxt_re_ucontext *cntx;
 	struct ib_ucontext *context;
-	struct bnxt_re_qp_req ureq;
 	struct ib_umem *umem;
 	int rc, bytes = 0;
 	int psn_nume;
@@ -2504,10 +2565,24 @@ static int bnxt_re_init_user_qp(struct bnxt_re_dev *rdev,
 	qplib_qp->dpi = &cntx->dpi;
 	qplib_qp->is_user = true;
 
+	if (ureq.sqprodva)
+		qp->sqprod = ib_umem_get_compat(rdev, context, udata, ureq.sqprodva,
+						sizeof(u32), IB_ACCESS_LOCAL_WRITE, 1);
+
+	if (ureq.sqconsva)
+		qp->sqcons = ib_umem_get_compat(rdev, context, udata, ureq.sqconsva,
+						sizeof(u32), IB_ACCESS_LOCAL_WRITE, 1);
+
+	if (ureq.rqprodva)
+		qp->rqprod = ib_umem_get_compat(rdev, context, udata, ureq.rqprodva,
+						sizeof(u32), IB_ACCESS_LOCAL_WRITE, 1);
+
+	if (ureq.rqconsva)
+		qp->rqcons = ib_umem_get_compat(rdev, context, udata, ureq.rqconsva,
+						sizeof(u32), IB_ACCESS_LOCAL_WRITE, 1);
 	return 0;
 rqfail:
-	ib_umem_release(qp->sumem);
-	qp->sumem = NULL;
+	bnxt_re_umem_free(&qp->sumem);
 #ifndef HAVE_RDMA_UMEM_FOR_EACH_DMA_BLOCK
 	qplib_qp->sq.sginfo.sghead = NULL;
 	qplib_qp->sq.sginfo.nmap = 0;
@@ -3213,7 +3288,7 @@ ALLOC_QP_RET bnxt_re_create_qp(ALLOC_QP_IN *qp_in,
 	if (active_qps > atomic_read(&rdev->stats.rsors.max_qp_count))
 		atomic_set(&rdev->stats.rsors.max_qp_count, active_qps);
 	bnxt_re_qp_info_add_qpinfo(rdev, qp);
-	BNXT_RE_DBR_LIST_ADD(rdev, qp, BNXT_RE_RES_TYPE_QP);
+	BNXT_RE_RES_LIST_ADD(rdev, qp, BNXT_RE_RES_TYPE_QP);
 
 	bnxt_re_dump_debug_stats(rdev, active_qps);
 
@@ -3241,10 +3316,12 @@ reg_db_fail:
 	bnxt_qplib_destroy_qp(&rdev->qplib_res, &qp->qplib_qp);
 free_umem:
 	if (udata) {
-		if (qp->rumem && !IS_ERR(qp->rumem))
-			ib_umem_release(qp->rumem);
-		if (qp->sumem && !IS_ERR(qp->sumem))
-			ib_umem_release(qp->sumem);
+		bnxt_re_umem_free(&qp->rumem);
+		bnxt_re_umem_free(&qp->sumem);
+		bnxt_re_umem_free(&qp->sqprod);
+		bnxt_re_umem_free(&qp->sqcons);
+		bnxt_re_umem_free(&qp->rqprod);
+		bnxt_re_umem_free(&qp->rqcons);
 	}
 fail:
 #ifndef HAVE_QP_ALLOC_IN_IB_CORE
@@ -3263,6 +3340,7 @@ static int bnxt_re_modify_shadow_qp(struct bnxt_re_dev *rdev,
 			     int qp_attr_mask)
 {
 	struct bnxt_re_qp *qp = rdev->gsi_ctx.gsi_sqp;
+	unsigned long flags;
 	int rc = 0;
 
 	if (qp_attr_mask & IB_QP_STATE) {
@@ -3285,8 +3363,18 @@ static int bnxt_re_modify_shadow_qp(struct bnxt_re_dev *rdev,
 	}
 
 	rc = bnxt_qplib_modify_qp(&rdev->qplib_res, &qp->qplib_qp);
-	if (rc)
+	if (rc) {
 		dev_err(rdev_to_dev(rdev), "Modify Shadow QP for QP1 failed");
+	} else {
+		if ((qp_attr_mask & IB_QP_STATE) && (!qp->qplib_qp.srq) &&
+		    (qp->qplib_qp.state == CMDQ_MODIFY_QP_NEW_STATE_RTR)) {
+			if (qp->qplib_qp.rq.hwq.prod) {
+				spin_lock_irqsave(&qp->rq_lock, flags);
+				bnxt_qplib_post_recv_db(&qp->qplib_qp);
+				spin_unlock_irqrestore(&qp->rq_lock, flags);
+			}
+		}
+	}
 	return rc;
 }
 
@@ -3410,6 +3498,81 @@ static void bnxt_qplib_manage_flush_qp(struct bnxt_re_qp *qp)
 	}
 }
 
+static int bnxt_re_update_ah_dscp_sl(struct bnxt_re_qp *qp, struct ib_qp_attr *qp_attr)
+{
+	struct bnxt_re_dev *rdev = qp->rdev;
+	u8 pri = qp_attr->ah_attr.sl;
+	bool dscp_valid = false;
+	bool pcp_valid = false;
+	u8 cos, dscp_pri = 0;
+	u8 dscp;
+	u8 i, j;
+
+	/*
+	 * The traffic class passed by the applications
+	 * contains both dscp and ecn values. DSCP is
+	 * upper six bits of the traffic class.
+	 */
+	dscp = qp_attr->ah_attr.grh.traffic_class >> 2;
+	qp->qplib_qp.modify_flags |= CMDQ_MODIFY_QP_MODIFY_MASK_VLAN_ID;
+	if (!bnxt_qplib_multiple_llq_supported(rdev->chip_ctx)) {
+		qp->qplib_qp.ah.traffic_class = dscp;
+		qp->qplib_qp.modify_flags |= CMDQ_MODIFY_QP_MODIFY_MASK_TRAFFIC_CLASS;
+		qp->qplib_qp.ah.sl = qp_attr->ah_attr.sl;
+		return 0;
+	}
+
+	if (!dscp && !pri)
+		goto default_queue;
+
+	if (dscp) {
+		for (i = 0; i < rdev->d2p_count; i++) {
+			if (rdev->d2p[i].dscp == dscp) {
+				dscp_pri = rdev->d2p[i].pri;
+				cos = rdev->p2cos[dscp_pri];
+				for (j = 0; j < rdev->lossless_q_count; j++) {
+					if (cos == rdev->lossless_qid[j]) {
+						dscp_valid = true;
+						break;
+					}
+				}
+			}
+		}
+		if (dscp_valid) {
+			qp->qplib_qp.modify_flags |= CMDQ_MODIFY_QP_MODIFY_MASK_TRAFFIC_CLASS;
+			qp->qplib_qp.ah.traffic_class = dscp;
+			qp->qplib_qp.ah.sl = dscp_pri;
+			return 0;
+		}
+	}
+	if (pri) {
+		cos = rdev->p2cos[pri];
+		for (j = 0; j < rdev->lossless_q_count; j++) {
+			if (cos == rdev->lossless_qid[j]) {
+				pcp_valid = true;
+				break;
+			}
+		}
+		if (pcp_valid) {
+			qp->qplib_qp.ah.sl = qp_attr->ah_attr.sl;
+			qp->qplib_qp.ah.traffic_class = 0;
+			return 0;
+		}
+	}
+	if (!dscp_valid && !pcp_valid) {
+		dev_warn_ratelimited(rdev_to_dev(qp->rdev),
+				     "Given DSCP %d and/or SL %d not mapping to lossless queue",
+				     dscp, pri);
+		dev_warn_ratelimited(rdev_to_dev(qp->rdev),
+				     "Changing to default roce traffic class DSCP %d and SL %d",
+				     rdev->tc_rec[0].roce_dscp, rdev->tc_rec[0].roce_prio);
+	}
+default_queue:
+	qp->qplib_qp.ah.traffic_class = rdev->tc_rec[0].roce_dscp;
+	qp->qplib_qp.ah.sl = rdev->tc_rec[0].roce_prio;
+	return 0;
+}
+
 int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 		      int qp_attr_mask, struct ib_udata *udata)
 {
@@ -3424,14 +3587,15 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 	IB_GID_ATTR *sgid_attr;
 #ifndef HAVE_GID_ATTR_IN_IB_AH
 	struct ib_gid_attr gid_attr;
-	int status;
 #endif  /* HAVE_GID_ATTR_IN_IB_AH */
+	int status;
 	union ib_gid sgid, *gid_ptr = NULL;
 	u8 nw_type;
 #endif /* RDMA_CORE_CAP_PROT_ROCE_UDP_ENCAP */
 	int rc, entries;
 	bool is_copy_to_udata = false;
 	bool is_qpmtu_high = false;
+	unsigned long flags;
 
 #ifdef HAVE_IB_QP_ATTR_STANDARD_BITS
 	if (qp_attr_mask & ~IB_QP_ATTR_STANDARD_BITS)
@@ -3443,6 +3607,7 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 	dev_attr = rdev->dev_attr;
 
 	qp->qplib_qp.modify_flags = 0;
+	qp->qplib_qp.udcc_exclude = true;
 	ppp = &qp->qplib_qp.ppp;
 	if (qp_attr_mask & IB_QP_STATE) {
 		curr_qp_state = __to_ib_qp_state(qp->qplib_qp.cur_qp_state);
@@ -3496,9 +3661,7 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 				     CMDQ_MODIFY_QP_MODIFY_MASK_FLOW_LABEL |
 				     CMDQ_MODIFY_QP_MODIFY_MASK_SGID_INDEX |
 				     CMDQ_MODIFY_QP_MODIFY_MASK_HOP_LIMIT |
-				     CMDQ_MODIFY_QP_MODIFY_MASK_TRAFFIC_CLASS |
-				     CMDQ_MODIFY_QP_MODIFY_MASK_DEST_MAC |
-				     CMDQ_MODIFY_QP_MODIFY_MASK_VLAN_ID;
+				     CMDQ_MODIFY_QP_MODIFY_MASK_DEST_MAC;
 		memcpy(qp->qplib_qp.ah.dgid.data, qp_attr->ah_attr.grh.dgid.raw,
 		       sizeof(qp->qplib_qp.ah.dgid.data));
 		qp->qplib_qp.ah.flow_label = qp_attr->ah_attr.grh.flow_label;
@@ -3506,9 +3669,9 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 						qp_attr->ah_attr.grh.sgid_index);
 		qp->qplib_qp.ah.host_sgid_index = qp_attr->ah_attr.grh.sgid_index;
 		qp->qplib_qp.ah.hop_limit = qp_attr->ah_attr.grh.hop_limit;
-		qp->qplib_qp.ah.traffic_class =
-					qp_attr->ah_attr.grh.traffic_class;
-		qp->qplib_qp.ah.sl = qp_attr->ah_attr.sl;
+		status = bnxt_re_update_ah_dscp_sl(qp, qp_attr);
+		if (status)
+			return status;
 #ifdef HAVE_IB_AH_DMAC
 		ether_addr_copy(qp->qplib_qp.ah.dmac, ROCE_DMAC(&qp_attr->ah_attr));
 #endif
@@ -3552,6 +3715,18 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 		qp->qplib_qp.nw_type =
 			CMDQ_MODIFY_QP_NETWORK_TYPE_ROCEV1;
 #endif
+		qp->qplib_qp.udcc_exclude = false;
+		if (!rdev->is_virtfn) {
+			rc = bnxt_udcc_subnet_check(rdev->en_dev, qp->qplib_qp.ah.dgid.data,
+						    qp->qplib_qp.ah.dmac, qp->qplib_qp.smac);
+			if (rc) {
+				qp->qplib_qp.udcc_exclude = true;
+				dev_dbg(rdev_to_dev(rdev),
+					"qp %#x UDCC invalid subnet: addr %pI6 dmac %pM smac %pM\n",
+					qp->qplib_qp.id, qp->qplib_qp.ah.dgid.data,
+					qp->qplib_qp.ah.dmac, qp->qplib_qp.smac);
+			}
+		}
 	}
 
 	/* MTU settings allowed only during INIT -> RTR */
@@ -3677,8 +3852,25 @@ int bnxt_re_modify_qp(struct ib_qp *ib_qp, struct ib_qp_attr *qp_attr,
 		dev_err(rdev_to_dev(rdev), "Modify HW QP failed!");
 		return rc;
 	}
-	if (qp_attr_mask & IB_QP_STATE)
+	if (qp_attr_mask & IB_QP_STATE) {
+		/*
+		 * When the QP moves to INIT to RTR in the modify_qp
+		 * call, firmware has a workaround to update the context
+		 * field with CDUDMA read/write. During the QP INIT
+		 * state in the post_receive driver needs to ensure
+		 * no doorbell is rung to work this properly. And once
+		 * QP moves to RTR ring the doorbell if the producer
+		 * index is present.
+		 */
+		if ((qp_attr->qp_state == IB_QPS_RTR) && (!qp->qplib_qp.srq)) {
+			if (qp->qplib_qp.rq.hwq.prod) {
+				spin_lock_irqsave(&qp->rq_lock, flags);
+				bnxt_qplib_post_recv_db(&qp->qplib_qp);
+				spin_unlock_irqrestore(&qp->rq_lock, flags);
+			}
+		}
 		bnxt_qplib_manage_flush_qp(qp);
+	}
 	if (ureq.comp_mask & BNXT_RE_COMP_MASK_MQP_EX_PPP_REQ_EN_MASK &&
 	    ppp->st_idx_en & CREQ_MODIFY_QP_RESP_PINGPONG_PUSH_ENABLED) {
 		resp.comp_mask |= BNXT_RE_COMP_MASK_MQP_EX_PPP_REQ_EN;
@@ -4848,6 +5040,7 @@ DESTROY_CQ_RET bnxt_re_destroy_cq(struct ib_cq *ib_cq
 {
 	struct bnxt_re_cq *cq = to_bnxt_re(ib_cq, struct bnxt_re_cq, ib_cq);
 	struct bnxt_re_dev *rdev = cq->rdev;
+	bool capture_snapdump;
 	int rc =  0;
 
 	if (cq->uctx_cq_page) {
@@ -4857,7 +5050,7 @@ DESTROY_CQ_RET bnxt_re_destroy_cq(struct ib_cq *ib_cq
 	}
 
 	if (cq->is_dbr_soft_cq && cq->uctx) {
-		struct bnxt_re_dbr_res_list *res_list;
+		struct bnxt_re_res_list *res_list;
 		void *dbr_page;
 
 		if (cq->uctx->dbr_recov_cq) {
@@ -4882,13 +5075,14 @@ DESTROY_CQ_RET bnxt_re_destroy_cq(struct ib_cq *ib_cq
 #endif
 	}
 
-	BNXT_RE_DBR_LIST_DEL(rdev, cq, BNXT_RE_RES_TYPE_CQ);
+	BNXT_RE_RES_LIST_DEL(rdev, cq, BNXT_RE_RES_TYPE_CQ);
 
 	if (rdev->hdbr_enabled)
 		bnxt_re_hdbr_db_unreg_cq(rdev, cq);
 
+	capture_snapdump = test_bit(CQ_FLAGS_CAPTURE_SNAPDUMP, &cq->qplib_cq.flags);
 	bnxt_re_save_resource_context(rdev, cpu_to_le32(cq->qplib_cq.id),
-				      CMDQ_READ_CONTEXT_TYPE_CQ);
+				      CMDQ_READ_CONTEXT_TYPE_CQ, capture_snapdump);
 
 	rc = bnxt_qplib_destroy_cq(&rdev->qplib_res, &cq->qplib_cq);
 	if (rc)
@@ -4897,8 +5091,10 @@ DESTROY_CQ_RET bnxt_re_destroy_cq(struct ib_cq *ib_cq
 				   __func__, cq->qplib_cq.id, rc);
 
 	bnxt_re_put_nq(rdev, cq->qplib_cq.nq);
-	if (cq->umem && !IS_ERR(cq->umem))
-		ib_umem_release(cq->umem);
+
+	bnxt_re_umem_free(&cq->umem);
+	bnxt_re_umem_free(&cq->cqprod);
+	bnxt_re_umem_free(&cq->cqcons);
 
 	kfree(cq->cql);
 	atomic_dec(&rdev->stats.rsors.cq_count);
@@ -4934,8 +5130,8 @@ ALLOC_CQ_RET bnxt_re_create_cq(ALLOC_CQ_IN *cq_in, int cqe,
 #ifndef HAVE_CREATE_CQ_UCONTEXT
 	struct ib_ucontext *context = NULL;
 #endif
+	struct bnxt_re_cq_req ureq = {};
 	struct bnxt_qplib_cq *qplcq;
-	struct bnxt_re_cq_req ureq;
 	struct bnxt_re_dev *rdev;
 	int rc, entries;
 	struct bnxt_re_cq *cq;
@@ -5025,7 +5221,7 @@ ALLOC_CQ_RET bnxt_re_create_cq(ALLOC_CQ_IN *cq_in, int cqe,
 		}
 
 		if (BNXT_RE_IS_DBR_RECOV_CQ(ureq)) {
-			struct bnxt_re_dbr_res_list *res_list;
+			struct bnxt_re_res_list *res_list;
 			void *dbr_page;
 			u32 *epoch;
 
@@ -5052,6 +5248,14 @@ ALLOC_CQ_RET bnxt_re_create_cq(ALLOC_CQ_IN *cq_in, int cqe,
 			goto success;
 		}
 
+		if (ureq.cqprodva)
+			cq->cqprod = ib_umem_get_compat(rdev, context, udata,
+							ureq.cqprodva, sizeof(u32),
+							IB_ACCESS_LOCAL_WRITE, 1);
+		if (ureq.cqconsva)
+			cq->cqcons = ib_umem_get_compat(rdev, context, udata,
+							ureq.cqconsva, sizeof(u32),
+							IB_ACCESS_LOCAL_WRITE, 1);
 		cq->umem = ib_umem_get_compat
 				      (rdev, context, udata, ureq.cq_va,
 				       entries * sizeof(struct cq_base),
@@ -5166,7 +5370,7 @@ ALLOC_CQ_RET bnxt_re_create_cq(ALLOC_CQ_IN *cq_in, int cqe,
 				goto destroy_cq;
 		}
 	}
-	BNXT_RE_DBR_LIST_ADD(rdev, cq, BNXT_RE_RES_TYPE_CQ);
+	BNXT_RE_RES_LIST_ADD(rdev, cq, BNXT_RE_RES_TYPE_CQ);
 
 success:
 #ifdef HAVE_CQ_ALLOC_IN_IB_CORE
@@ -5185,9 +5389,11 @@ unreg_db_cq:
 destroy_cq:
 	(void)bnxt_qplib_destroy_cq(&rdev->qplib_res, qplcq);
 c2fail:
-	if (udata && cq->umem && !IS_ERR(cq->umem))
-		ib_umem_release(cq->umem);
+	bnxt_re_umem_free(&cq->umem);
 fail:
+	bnxt_re_umem_free(&cq->cqprod);
+	bnxt_re_umem_free(&cq->cqcons);
+
 	if (cq) {
 		if (cq->cql)
 			kfree(cq->cql);
@@ -5233,7 +5439,7 @@ static void bnxt_re_resize_cq_complete(struct bnxt_re_cq *cq)
 
 	cq->qplib_cq.max_wqe = cq->resize_cqe;
 	if (cq->resize_umem) {
-		ib_umem_release(cq->umem);
+		bnxt_re_umem_free(&cq->umem);
 		cq->umem = cq->resize_umem;
 		cq->resize_umem = NULL;
 		cq->resize_cqe = 0;
@@ -5359,7 +5565,7 @@ int bnxt_re_resize_cq(struct ib_cq *ib_cq, int cqe, struct ib_udata *udata)
 
 fail:
 	if (cq->resize_umem) {
-		ib_umem_release(cq->resize_umem);
+		bnxt_re_umem_free(&cq->resize_umem);
 		cq->resize_umem = NULL;
 		cq->resize_cqe = 0;
 		memcpy(&cq->qplib_cq.sginfo, &sginfo, sizeof(sginfo));
@@ -6166,6 +6372,7 @@ struct ib_mr *bnxt_re_get_dma_mr(struct ib_pd *ib_pd, int mr_access_flags)
 	max_mr_count =  atomic_read(&rdev->stats.rsors.mr_count);
 	if (max_mr_count > atomic_read(&rdev->stats.rsors.max_mr_count))
 		atomic_set(&rdev->stats.rsors.max_mr_count, max_mr_count);
+	BNXT_RE_RES_LIST_ADD(rdev, mr, BNXT_RE_RES_TYPE_MR);
 
 	return &mr->ib_mr;
 
@@ -6189,6 +6396,10 @@ static void bnxt_re_capture_mrdump(struct bnxt_re_mr *mr)
 {
 	struct bnxt_re_dev *rdev = mr->rdev;
 	struct qdump_array *qdump;
+
+	if ((rdev->snapdump_dbg_lvl == BNXT_RE_SNAPDUMP_NONE) ||
+	    (rdev->snapdump_dbg_lvl == BNXT_RE_SNAPDUMP_ERR))
+		return;
 
 	if (!rdev->qdump_head.qdump)
 		return;
@@ -6236,7 +6447,7 @@ int bnxt_re_dereg_mr(struct ib_mr *ib_mr
 #endif
 		bnxt_re_save_resource_context(rdev,
 					      cpu_to_le32(mr->qplib_mr.lkey),
-					      CMDQ_READ_CONTEXT_TYPE_MRW);
+					      CMDQ_READ_CONTEXT_TYPE_MRW, 0);
 
 		rc = bnxt_qplib_free_mrw(&rdev->qplib_res, &mr->qplib_mr);
 		if (rc)
@@ -6263,8 +6474,12 @@ int bnxt_re_dereg_mr(struct ib_mr *ib_mr
 		mr->is_invalcb_active = false;
 		bnxt_re_peer_mem_release(mr->ib_umem);
 	}
-	kfree(mr);
+
+	BNXT_RE_RES_LIST_DEL(rdev, mr, BNXT_RE_RES_TYPE_MR);
 	atomic_dec(&rdev->stats.rsors.mr_count);
+	if (mr->is_dmabuf)
+		atomic_dec(&rdev->stats.rsors.mr_dmabuf_count);
+	kfree(mr);
 	return 0;
 }
 
@@ -6366,6 +6581,8 @@ struct ib_mr *bnxt_re_alloc_mr(struct ib_pd *ib_pd, enum ib_mr_type type,
 	max_mr_count =  atomic_read(&rdev->stats.rsors.mr_count);
 	if (max_mr_count > atomic_read(&rdev->stats.rsors.max_mr_count))
 		atomic_set(&rdev->stats.rsors.max_mr_count, max_mr_count);
+	BNXT_RE_RES_LIST_ADD(rdev, mr, BNXT_RE_RES_TYPE_MR);
+
 	return &mr->ib_mr;
 
 free_page:
@@ -6463,7 +6680,7 @@ int bnxt_re_dealloc_mw(struct ib_mw *ib_mw)
 	int rc;
 
 	bnxt_re_save_resource_context(rdev, cpu_to_le32(mw->qplib_mw.lkey),
-				      CMDQ_READ_CONTEXT_TYPE_MRW);
+				      CMDQ_READ_CONTEXT_TYPE_MRW, 0);
 
 	rc = bnxt_qplib_free_mrw(&rdev->qplib_res, &mw->qplib_mw);
 	if (rc) {
@@ -6499,7 +6716,6 @@ static void bnxt_re_invalidate_umem(struct ib_umem *umem,
 		return;
 	}
 
-	bnxt_re_set_inval_ctx_peer_callback(umem);
 	(void) bnxt_qplib_free_mrw(&mr->rdev->qplib_res, &mr->qplib_mr);
 	complete(&mr->invalidation_comp);
 }
@@ -6535,24 +6751,18 @@ static int bnxt_re_get_page_shift(struct ib_umem *umem,
 {
 	int pgshft;
 
-#ifdef HAVE_IB_UMEM_GET_FLAGS
-#if !defined(HAVE_IB_UMEM_PAGE_SIZE) && !defined(HAVE_IB_UMEM_PAGE_SHIFT)
-	pgshft = ib_umem_get_peer_page_shift(umem);
-	if (pgshft > 0)
-		return pgshft;
-	/* Else host memory. Use OS native functions to get page shift */
-#endif
-#endif
-
 #if defined(HAVE_DMA_BLOCK_ITERATOR) && defined(HAVE_IB_UMEM_FIND_BEST_PGSZ)
 	pgshft = bnxt_re_best_page_shift(umem, va, cmask);
-#else
-#ifdef HAVE_IB_UMEM_PAGE_SHIFT
+#elif defined(HAVE_IB_UMEM_PAGE_SHIFT)
 	pgshft = umem->page_shift;
-#else
+#elif defined(HAVE_IB_UMEM_PAGE_SIZE)
 	pgshft = ilog2(umem->page_size);
+#elif defined(HAVE_IB_UMEM_GET_FLAGS)
+	pgshft = ib_umem_get_peer_page_shift(umem);
+#else
+	pgshft = PAGE_SHIFT;
 #endif
-#endif /* HAVE_DMA_BLOCK_ITERATOR*/
+
 	return pgshft;
 }
 
@@ -6572,13 +6782,13 @@ struct ib_mr *bnxt_re_reg_user_mr_dmabuf(struct ib_pd *ib_pd, u64 start,
 					 int mr_access_flags, struct ib_udata *udata)
 {
 	struct bnxt_re_pd *pd = to_bnxt_re(ib_pd, struct bnxt_re_pd, ib_pd);
+	u32 max_mr_count, max_mr_dmabuf_count;
 	struct bnxt_re_dev *rdev = pd->rdev;
 	struct ib_umem_dmabuf *umem_dmabuf;
 	struct bnxt_qplib_mrinfo mrinfo;
 	int umem_pgs, page_shift, rc;
 	struct bnxt_re_mr *mr;
 	struct ib_umem *umem;
-	u32 max_mr_count;
 	int npages;
 
 	dev_dbg(rdev_to_dev(rdev), "Register user DMA-BUF MR");
@@ -6599,6 +6809,7 @@ struct ib_mr *bnxt_re_reg_user_mr_dmabuf(struct ib_pd *ib_pd, u64 start,
 	mr->qplib_mr.pd = &pd->qplib_pd;
 	mr->qplib_mr.flags = __from_ib_access_flags(mr_access_flags);
 	mr->qplib_mr.type = CMDQ_ALLOCATE_MRW_MRW_FLAGS_MR;
+	mr->is_dmabuf = true;
 
 	if (!_is_alloc_mr_unified(rdev->qplib_res.dattr)) {
 		rc = bnxt_qplib_alloc_mrw(&rdev->qplib_res, &mr->qplib_mr);
@@ -6670,6 +6881,11 @@ struct ib_mr *bnxt_re_reg_user_mr_dmabuf(struct ib_pd *ib_pd, u64 start,
 	max_mr_count =  atomic_read(&rdev->stats.rsors.mr_count);
 	if (max_mr_count > atomic_read(&rdev->stats.rsors.max_mr_count))
 		atomic_set(&rdev->stats.rsors.max_mr_count, max_mr_count);
+	max_mr_dmabuf_count = atomic_inc_return(&rdev->stats.rsors.mr_dmabuf_count);
+	if (max_mr_dmabuf_count > atomic_read(&rdev->stats.rsors.max_mr_dmabuf_count))
+		atomic_set(&rdev->stats.rsors.max_mr_dmabuf_count, max_mr_dmabuf_count);
+
+	BNXT_RE_RES_LIST_ADD(rdev, mr, BNXT_RE_RES_TYPE_MR);
 
 	return &mr->ib_mr;
 
@@ -6802,6 +7018,8 @@ struct ib_mr *bnxt_re_reg_user_mr(struct ib_pd *ib_pd, u64 start, u64 length,
 		mr->is_invalcb_active = true;
 	}
 #endif
+	BNXT_RE_RES_LIST_ADD(rdev, mr, BNXT_RE_RES_TYPE_MR);
+
 	return &mr->ib_mr;
 
 free_umem:
@@ -7068,7 +7286,7 @@ ALLOC_UCONTEXT_RET bnxt_re_alloc_ucontext(ALLOC_UCONTEXT_IN *uctx_in,
 	if (rc)
 		goto err_free_page;
 
-	BNXT_RE_DBR_LIST_ADD(rdev, uctx, BNXT_RE_RES_TYPE_UCTX);
+	BNXT_RE_RES_LIST_ADD(rdev, uctx, BNXT_RE_RES_TYPE_UCTX);
 
 	INIT_LIST_HEAD(&uctx->cq_list);
 	mutex_init(&uctx->cq_lock);
@@ -7116,7 +7334,7 @@ DEALLOC_UCONTEXT_RET bnxt_re_dealloc_ucontext(struct ib_ucontext *ib_uctx)
 	struct bnxt_re_dev *rdev = uctx->rdev;
 	int rc = 0;
 
-	BNXT_RE_DBR_LIST_DEL(rdev, uctx, BNXT_RE_RES_TYPE_UCTX);
+	BNXT_RE_RES_LIST_DEL(rdev, uctx, BNXT_RE_RES_TYPE_UCTX);
 
 	if (rdev->hdbr_enabled && uctx->hdbr_app) {
 		struct bnxt_re_hdbr_app *app = uctx->hdbr_app;

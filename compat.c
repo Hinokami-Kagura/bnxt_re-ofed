@@ -251,6 +251,15 @@ bool bnxt_re_is_lag_allowed(ifbond *master, ifslave *slave,
 	if (BNXT_EN_NPAR(rdev->en_dev) || BNXT_EN_NPAR(pf_peer->en_dev))
 		goto exit;
 
+	/* In Thor2, bond mode 0 is not supported */
+	if (BNXT_EN_HW_LAG(rdev->en_dev) &&
+	    master->bond_mode == BOND_MODE_ROUNDROBIN) {
+		dev_info(rdev_to_dev(rdev),
+			 "RoCE LAG not supported for bond_mode %d when hw lag enabled.\n",
+			 master->bond_mode);
+		goto exit;
+	}
+
 	/* Bonding mode must be 1, 2 or 4 */
 	if ((master->bond_mode != BOND_MODE_ACTIVEBACKUP) &&
 	    (master->bond_mode != BOND_MODE_XOR) &&
@@ -341,17 +350,6 @@ void bnxt_re_set_inflight_invalidation_ctx(struct ib_umem *umem)
 #endif /* IB_PEER_MEM_MOD_SUPPORT */
 }
 
-void bnxt_re_set_inval_ctx_peer_callback(struct ib_umem *umem)
-{
-#ifdef IB_PEER_MEM_MOD_SUPPORT
-	struct ib_peer_umem *peer_umem = ib_peer_mem_get_data(umem);
-	peer_umem->invalidation_ctx->peer_callback = 1;
-#else
-#ifdef HAVE_IB_UMEM_GET_FLAGS
-	umem->invalidation_ctx->peer_callback = 1;
-#endif
-#endif
-}
 void *bnxt_re_get_peer_mem(struct ib_umem *umem)
 {
 
@@ -625,26 +623,55 @@ int pci_enable_atomic_ops_to_root(struct pci_dev *dev, u32 cap_mask)
 }
 #endif
 
+void bnxt_re_umem_free(struct ib_umem **umem)
+{
+	if (IS_ERR_OR_NULL(*umem))
+		return;
+
+	ib_umem_release(*umem);
+	*umem = NULL;
+}
+
 struct ib_umem *ib_umem_get_compat(struct bnxt_re_dev *rdev,
 				   struct ib_ucontext *ucontext,
 				   struct ib_udata *udata,
 				   unsigned long addr,
 				   size_t size, int access, int dmasync)
 {
+	struct ib_umem *umem;
+
 #ifdef HAVE_IB_DEVICE_IN_IB_UMEM_GET
-	return ib_umem_get(&rdev->ibdev, addr, size, access);
+	umem = ib_umem_get(&rdev->ibdev, addr, size, access);
 #else
 #ifndef HAVE_UDATA_IN_IB_UMEM_GET
-	return ib_umem_get(ucontext, addr, size, access, dmasync);
+	umem = ib_umem_get(ucontext, addr, size, access, dmasync);
 #else
-	return ib_umem_get(udata, addr, size, access
+	umem = ib_umem_get(udata, addr, size, access
 #ifdef HAVE_DMASYNC_IB_UMEM_GET
 			, dmasync
 #endif
 			);
 #endif
 #endif
+	if (!umem)
+		umem = ERR_PTR(-EIO);
+	return umem;
 }
+
+#ifdef HAVE_IB_UMEM_GET_PEER
+static struct ib_umem *ib_umem_get_peer_compat(struct bnxt_re_dev *rdev,
+					       struct ib_udata *udata,
+					       unsigned long addr,
+					       size_t size, int access, int dmasync)
+{
+#ifdef HAVE_IB_DEVICE_IN_IB_UMEM_GET
+	return ib_umem_get_peer(&rdev->ibdev, addr, size, access,
+#else
+	return ib_umem_get_peer(udata, addr, size, access,
+#endif
+				IB_PEER_MEM_INVAL_SUPP);
+}
+#endif
 
 struct ib_umem *ib_umem_get_flags_compat(struct bnxt_re_dev *rdev,
 					 struct ib_ucontext *ucontext,
@@ -652,22 +679,27 @@ struct ib_umem *ib_umem_get_flags_compat(struct bnxt_re_dev *rdev,
 					 unsigned long addr,
 					 size_t size, int access, int dmasync)
 {
+	struct ib_umem *umem;
+
 #ifdef HAVE_IB_UMEM_GET_PEER
-	return ib_umem_get_peer(&rdev->ibdev, addr, size, access,
-				IB_PEER_MEM_INVAL_SUPP);
+	umem = ib_umem_get_peer_compat(rdev, udata, addr, size, access,
+				       IB_PEER_MEM_INVAL_SUPP);
 #else
 #ifdef HAVE_IB_UMEM_GET_FLAGS
-	return ib_umem_get_flags(&rdev->ibdev, ucontext, udata, addr, size,
+	umem = ib_umem_get_flags(&rdev->ibdev, ucontext, udata, addr, size,
 				 access,
 #ifdef CONFIG_INFINIBAND_PEER_MEM
 				 IB_UMEM_PEER_ALLOW | IB_UMEM_PEER_INVAL_SUPP |
 #endif
 				 0);
 #else
-	return ib_umem_get_compat(rdev, ucontext, udata, addr, size,
+	umem = ib_umem_get_compat(rdev, ucontext, udata, addr, size,
 				  access, 0);
 #endif
 #endif
+	if (!umem)
+		umem = ERR_PTR(-EIO);
+	return umem;
 }
 
 int __bnxt_re_set_vma_data(void *bnxt_re_uctx,

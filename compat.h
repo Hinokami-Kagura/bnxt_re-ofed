@@ -250,7 +250,6 @@ static struct configfs_attr attr_##_name =			\
 
 #ifdef CONFIG_INFINIBAND_PEER_MEM
 void bnxt_re_set_inflight_invalidation_ctx(struct ib_umem *umem);
-void bnxt_re_set_inval_ctx_peer_callback(struct ib_umem *umem);
 void *bnxt_re_get_peer_mem(struct ib_umem *umem);
 #endif /* CONFIG_INFINIBAND_PEER_MEM */
 
@@ -334,6 +333,7 @@ struct ib_umem *ib_umem_get_flags_compat(struct bnxt_re_dev *rdev,
 					 struct ib_udata *udata,
 					 unsigned long addr,
 					 size_t size, int access, int dmasync);
+void bnxt_re_umem_free(struct ib_umem **umem);
 
 #ifndef HAVE_AH_ALLOC_IN_IB_CORE
 typedef struct ib_ah* CREATE_AH_RET;
@@ -576,6 +576,28 @@ static inline void addrconf_addr_eui48(u8 *eui, const char *const addr)
 
 #ifndef __counted_by
 #define __counted_by(member)
+#endif
+
+#if defined(HAVE_EXTERNAL_OFED) && defined(OFED_5_x)
+#undef HAVE_IB_UMEM_DMABUF_PINNED
+#undef HAVE_IB_UMEM_DMABUF
+#if !defined(HAVE_MMU_INTERVAL_NOTIFIER)
+#undef HAVE_IB_DEVICE_IN_IB_UMEM_GET
+#endif
+#endif
+
+#if defined(HAVE_EXTERNAL_OFED) && !defined(HAS_SG_APPEND_TABLE)
+#undef HAVE_IB_UMEM_SG_APPEND_TABLE
+#endif
+
+#if !defined(HAVE_EXTERNAL_OFED) && !defined(CONFIG_AUXILIARY_BUS)
+#undef HAVE_AUXILIARY_DRIVER
+#endif
+
+#if defined(HAVE_EXTERNAL_OFED)
+#ifdef HAVE_NETDEV_BONDING_INFO
+#undef NETDEV_BONDING_INFO
+#endif
 #endif
 
 #endif /* __BNXT_RE_COMPAT_H__ */

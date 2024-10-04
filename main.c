@@ -45,7 +45,6 @@
 
 #include "ib_verbs.h"
 #include "bnxt_re-abi.h"
-#include "dcb.h"
 /* bnxt_en.h includes */
 #include "bnxt.h"
 #include "hdbr.h"
@@ -81,6 +80,17 @@ unsigned int cmdq_shadow_qd = RCFW_CMD_NON_BLOCKING_SHADOW_QD;
 module_param_named(cmdq_shadow_qd, cmdq_shadow_qd, uint, 0644);
 MODULE_PARM_DESC(cmdq_shadow_qd, "Perf Stat Debug: Shadow QD Range (1-64) - Default is 64");
 
+#define BNXT_RE_EVENT_UDCC_SESSION_ID(data1)							\
+	(((data1) & ASYNC_EVENT_UDCC_SESSION_CHANGE_EVENT_DATA1_UDCC_SESSION_ID_MASK) >>	\
+	 ASYNC_EVENT_UDCC_SESSION_CHANGE_EVENT_DATA1_UDCC_SESSION_ID_SFT)
+
+#define BNXT_RE_EVENT_UDCC_SESSION_OPCODE(data2)						\
+	(((data2) & ASYNC_EVENT_UDCC_SESSION_CHANGE_EVENT_DATA2_SESSION_ID_OP_CODE_MASK) >>	\
+	 ASYNC_EVENT_UDCC_SESSION_CHANGE_EVENT_DATA2_SESSION_ID_OP_CODE_SFT)
+
+#define BNXT_RE_UDCC_SESSION_CREATE	0
+#define BNXT_RE_UDCC_SESSION_DELETE	1
+
 /* globals */
 struct list_head bnxt_re_dev_list = LIST_HEAD_INIT(bnxt_re_dev_list);
 
@@ -99,12 +109,15 @@ static int bnxt_re_update_fw_lag_info(struct bnxt_re_bond_info *binfo,
 			       bool aggr_en);
 static int bnxt_re_query_hwrm_intf_version(struct bnxt_re_dev *rdev);
 
-static void bnxt_re_clear_dcbx_cc_param(struct bnxt_re_dev *rdev);
+static int bnxt_re_init_cc_param(struct bnxt_re_dev *rdev);
+static void bnxt_re_clear_cc_param(struct bnxt_re_dev *rdev);
 static int bnxt_re_hwrm_dbr_pacing_qcfg(struct bnxt_re_dev *rdev);
 static int bnxt_re_ib_init(struct bnxt_re_dev *rdev);
 static void bnxt_re_ib_init_2(struct bnxt_re_dev *rdev);
 static void bnxt_re_dispatch_event(struct ib_device *ibdev, struct ib_qp *qp,
 				   u8 port_num, enum ib_event_type event);
+static struct bnxt_re_bond_info *binfo_from_2nd_ndev(struct net_device *netdev);
+
 static void bnxt_re_update_fifo_occup_slabs(struct bnxt_re_dev *rdev,
 					    u32 fifo_occup)
 {
@@ -254,15 +267,11 @@ skip_nq:
 		bnxt_qplib_rcfw_stop_irq(rcfw, kill_tasklet);
 }
 
-
-#define MAX_DSCP_PRI_TUPLE	64
-
 int bnxt_re_get_pri_dscp_settings(struct bnxt_re_dev *rdev,
 				  u16 target_id,
 				  struct bnxt_re_tc_rec *tc_rec)
 {
-	struct bnxt_re_dscp2pri d2p[MAX_DSCP_PRI_TUPLE] = {};
-	u16 count = MAX_DSCP_PRI_TUPLE;
+	struct bnxt_re_dscp2pri *d2p;
 	int rc = 0;
 	int i;
 
@@ -273,11 +282,11 @@ int bnxt_re_get_pri_dscp_settings(struct bnxt_re_dev *rdev,
 	tc_rec->dscp_valid = 0;
 	tc_rec->cnp_dscp_bv = 0;
 	tc_rec->roce_dscp_bv = 0;
-	rc = bnxt_re_query_hwrm_dscp2pri(rdev, d2p, &count, target_id);
+	rc = bnxt_re_query_hwrm_dscp2pri(rdev, target_id);
 	if (rc)
 		return rc;
-
-	for (i = 0; i < count; i++) {
+	d2p = rdev->d2p;
+	for (i = 0; i < rdev->d2p_count; i++) {
 		if (d2p[i].pri == tc_rec->roce_prio) {
 			tc_rec->roce_dscp = d2p[i].dscp;
 			tc_rec->roce_dscp_bv |= (1ull << d2p[i].dscp);
@@ -324,6 +333,21 @@ static void bnxt_re_uninit_aer_wq(struct bnxt_re_dev *rdev)
 	flush_workqueue(rdev->aer_wq);
 	destroy_workqueue(rdev->aer_wq);
 	rdev->aer_wq = NULL;
+}
+
+static void bnxt_re_init_udcc_wq(struct bnxt_re_dev *rdev)
+{
+	if (bnxt_qplib_udcc_supported(rdev->chip_ctx))
+		rdev->udcc_wq = create_singlethread_workqueue("bnxt_re_udcc_wq");
+}
+
+static void bnxt_re_uninit_udcc_wq(struct bnxt_re_dev *rdev)
+{
+	if (!rdev->udcc_wq)
+		return;
+	flush_workqueue(rdev->udcc_wq);
+	destroy_workqueue(rdev->udcc_wq);
+	rdev->udcc_wq = NULL;
 }
 
 static int bnxt_re_update_qp1_tos_dscp(struct bnxt_re_dev *rdev)
@@ -664,7 +688,7 @@ static void bnxt_re_dbr_drop_recov_task(struct work_struct *work)
 {
 	struct bnxt_re_dbr_drop_recov_work *dbr_recov_work =
 			container_of(work, struct bnxt_re_dbr_drop_recov_work, work);
-	struct bnxt_re_dbr_res_list *res_list;
+	struct bnxt_re_res_list *res_list;
 	u64 start_time, diff_time_msec;
 	struct bnxt_re_ucontext *uctx;
 	bool user_dbr_drop_recov;
@@ -702,7 +726,7 @@ static void bnxt_re_dbr_drop_recov_task(struct work_struct *work)
 	/* ARM_ENA for all userland CQs */
 	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_CQ];
 	spin_lock(&res_list->lock);
-	list_for_each_entry(cq, &res_list->head, dbr_list) {
+	list_for_each_entry(cq, &res_list->head, res_list) {
 		if (cq->umem)
 			bnxt_qplib_replay_db(&cq->qplib_cq.dbinfo, true);
 	}
@@ -711,7 +735,7 @@ static void bnxt_re_dbr_drop_recov_task(struct work_struct *work)
 	/* ARM_ENA for all userland SRQs */
 	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_SRQ];
 	spin_lock(&res_list->lock);
-	list_for_each_entry(srq, &res_list->head, dbr_list) {
+	list_for_each_entry(srq, &res_list->head, res_list) {
 		if (srq->qplib_srq.is_user)
 			bnxt_qplib_replay_db(&srq->qplib_srq.dbinfo, true);
 	}
@@ -723,7 +747,7 @@ static void bnxt_re_dbr_drop_recov_task(struct work_struct *work)
 	/* Notify all uusrlands */
 	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_UCTX];
 	spin_lock(&res_list->lock);
-	list_for_each_entry(uctx, &res_list->head, dbr_list) {
+	list_for_each_entry(uctx, &res_list->head, res_list) {
 		uint32_t *user_epoch = uctx->dbr_recov_cq_page;
 
 		if (!user_epoch || !uctx->dbr_recov_cq) {
@@ -744,7 +768,7 @@ skip_user_recovery:
 	/* ARM_ENA and Cons update DBs for Kernel CQs */
 	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_CQ];
 	spin_lock(&res_list->lock);
-	list_for_each_entry(cq, &res_list->head, dbr_list) {
+	list_for_each_entry(cq, &res_list->head, res_list) {
 		if (!cq->umem) {
 			bnxt_qplib_replay_db(&cq->qplib_cq.dbinfo, true);
 			bnxt_qplib_replay_db(&cq->qplib_cq.dbinfo, false);
@@ -755,7 +779,7 @@ skip_user_recovery:
 	/* ARM_ENA and Cons update DBs for Kernel SRQs */
 	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_SRQ];
 	spin_lock(&res_list->lock);
-	list_for_each_entry(srq, &res_list->head, dbr_list) {
+	list_for_each_entry(srq, &res_list->head, res_list) {
 		if (!srq->qplib_srq.is_user) {
 			bnxt_qplib_replay_db(&srq->qplib_srq.dbinfo, true);
 			bnxt_qplib_replay_db(&srq->qplib_srq.dbinfo, false);
@@ -766,7 +790,7 @@ skip_user_recovery:
 	/* QP */
 	res_list = &rdev->res_list[BNXT_RE_RES_TYPE_QP];
 	spin_lock(&res_list->lock);
-	list_for_each_entry(qp, &res_list->head, dbr_list) {
+	list_for_each_entry(qp, &res_list->head, res_list) {
 		struct bnxt_qplib_q *q;
 		/* Do nothing for user QPs */
 		if (qp->qplib_qp.is_user)
@@ -795,7 +819,7 @@ skip_user_recovery:
 		user_recov_pend = 0;
 		res_list = &rdev->res_list[BNXT_RE_RES_TYPE_UCTX];
 		spin_lock(&res_list->lock);
-		list_for_each_entry(uctx, &res_list->head, dbr_list) {
+		list_for_each_entry(uctx, &res_list->head, res_list) {
 			uint32_t *epoch = uctx->dbr_recov_cq_page;
 
 			if (!epoch || !uctx->dbr_recov_cq)
@@ -874,6 +898,31 @@ static void bnxt_re_dbq_wq_task(struct work_struct *work)
 	}
 exit:
 	kfree(dbq_work);
+}
+
+static void bnxt_re_udcc_task(struct work_struct *work)
+{
+	struct bnxt_re_udcc_work *udcc_work =
+			container_of(work, struct bnxt_re_udcc_work, work);
+	struct bnxt_re_dev *rdev;
+
+	rdev = udcc_work->rdev;
+	if (!rdev)
+		goto exit;
+	if (udcc_work->session_id >= BNXT_RE_UDCC_MAX_SESSIONS)
+		goto exit;
+	switch (udcc_work->session_opcode) {
+	case BNXT_RE_UDCC_SESSION_CREATE:
+		bnxt_re_debugfs_create_udcc_session(rdev, udcc_work->session_id);
+		break;
+	case BNXT_RE_UDCC_SESSION_DELETE:
+		bnxt_re_debugfs_delete_udcc_session(rdev, udcc_work->session_id);
+		break;
+	default:
+		break;
+	}
+exit:
+	kfree(udcc_work);
 }
 
 static bool bnxt_re_is_qp1_or_shadow_qp(struct bnxt_re_dev *rdev,
@@ -1009,10 +1058,42 @@ static void bnxt_re_aer_wq_task(struct work_struct *work)
 	kfree(aer_work);
 }
 
+static void bnxt_re_get_bar_maps(struct bnxt_re_dev *rdev)
+{
+	struct bnxt_en_dev *en_dev = rdev->en_dev;
+	int i;
+
+	/* Invalidate the BAR count till new address is updated */
+	atomic_set(&rdev->qplib_res.bar_cnt, 0);
+	for (i = 0; i < en_dev->bar_cnt; i++) {
+		rdev->qplib_res.bar_addr[i].hv_bar_addr = en_dev->bar_addr[i].hv_bar_addr;
+		rdev->qplib_res.bar_addr[i].vm_bar_addr = en_dev->bar_addr[i].vm_bar_addr;
+		rdev->qplib_res.bar_addr[i].bar_size = en_dev->bar_addr[i].bar_size;
+
+		dev_dbg(rdev_to_dev(rdev),
+			"HPA: 0x%llx\n", rdev->qplib_res.bar_addr[i].hv_bar_addr);
+		dev_dbg(rdev_to_dev(rdev),
+			"GPA: 0x%llx\n", rdev->qplib_res.bar_addr[i].vm_bar_addr);
+		dev_dbg(rdev_to_dev(rdev),
+			"size: 0x%llx\n", rdev->qplib_res.bar_addr[i].bar_size);
+	}
+	atomic_set(&rdev->qplib_res.bar_cnt, en_dev->bar_cnt);
+}
+
+static void bnxt_re_mmap_wq_task(struct work_struct *work)
+{
+	struct bnxt_re_dev *rdev = container_of(work, struct bnxt_re_dev,
+						peer_mmap_work.work);
+
+	dev_dbg(rdev_to_dev(rdev), "ATS Memory MAP available\n");
+	bnxt_re_get_bar_maps(rdev);
+}
+
 static void bnxt_re_async_notifier(void *handle, struct hwrm_async_event_cmpl *cmpl)
 {
 	struct bnxt_re_en_dev_info *en_info = auxiliary_get_drvdata(handle);
 	struct bnxt_re_dbr_drop_recov_work *dbr_recov_work;
+	struct bnxt_re_udcc_work *udcc_work;
 	struct bnxt_re_dcb_work *dcb_work;
 	struct bnxt_re_dbq_work *dbq_work;
 	struct bnxt_re_aer_work *aer_work;
@@ -1124,6 +1205,23 @@ static void bnxt_re_async_notifier(void *handle, struct hwrm_async_event_cmpl *c
 			INIT_WORK(&dbr_recov_work->work, bnxt_re_dbr_drop_recov_task);
 			queue_work(rdev->dbr_drop_recov_wq, &dbr_recov_work->work);
 		}
+		break;
+	case ASYNC_EVENT_CMPL_EVENT_ID_UDCC_SESSION_CHANGE:
+		if (!bnxt_qplib_udcc_supported(rdev->chip_ctx))
+			break;
+		udcc_work = kzalloc(sizeof(*udcc_work), GFP_ATOMIC);
+		if (!udcc_work)
+			break;
+		udcc_work->session_id = BNXT_RE_EVENT_UDCC_SESSION_ID(data1);
+		udcc_work->session_opcode = BNXT_RE_EVENT_UDCC_SESSION_OPCODE(data2);
+		udcc_work->rdev = rdev;
+		INIT_WORK(&udcc_work->work, bnxt_re_udcc_task);
+		queue_work(rdev->udcc_wq, &udcc_work->work);
+		break;
+	case ASYNC_EVENT_CMPL_EVENT_ID_PEER_MMAP_CHANGE:
+		INIT_DELAYED_WORK(&rdev->peer_mmap_work, bnxt_re_mmap_wq_task);
+		schedule_delayed_work(&rdev->peer_mmap_work,
+				      msecs_to_jiffies(PEER_MMAP_WORK_SCHED_DELAY));
 		break;
 	default:
 		break;
@@ -1283,8 +1381,10 @@ exit:
 static int bnxt_re_handle_start(struct auxiliary_device *adev)
 {
 	struct bnxt_re_en_dev_info *en_info = auxiliary_get_drvdata(adev);
+	struct bnxt_re_en_dev_info *en_info2 = NULL;
 	struct bnxt_re_bond_info *info = NULL;
 	struct bnxt_re_dev *rdev = NULL;
+	bool init_ib_required = true;
 	struct net_device *real_dev;
 	struct bnxt_en_dev *en_dev;
 	struct net_device *netdev;
@@ -1339,15 +1439,29 @@ static int bnxt_re_handle_start(struct auxiliary_device *adev)
 	if (en_info->binfo_valid) {
 		info->rdev = rdev;
 		en_info->binfo_valid = false;
+		/* In case secondary rdev recovered first */
+		if (info->aux_dev2)
+			en_info2 = auxiliary_get_drvdata(info->aux_dev2);
+		if (en_info2)
+			info->rdev_peer = en_info2->rdev;
+	} else if (test_bit(BNXT_RE_FLAG_EN_DEV_SECONDARY_DEV, &en_info->flags)) {
+		/* In case primary rdev recovered first */
+		info = binfo_from_2nd_ndev(real_dev);
+		if (info)
+			info->rdev_peer = rdev;
+		init_ib_required = false;
 	}
 	bnxt_re_get_link_speed(rdev);
 	rtnl_unlock();
-	rc = bnxt_re_ib_init(rdev);
-	if (rc) {
-		dev_err(rdev_to_dev(rdev), "Failed ib_init\n");
-		return rc;
+
+	if (init_ib_required) {
+		rc = bnxt_re_ib_init(rdev);
+		if (rc) {
+			dev_err(rdev_to_dev(rdev), "Failed ib_init\n");
+			return rc;
+		}
+		bnxt_re_ib_init_2(rdev);
 	}
-	bnxt_re_ib_init_2(rdev);
 
 	/* Reset active_port_map so that worker can update f/w using SET_LINK_AGGR_MODE */
 	if (rdev->binfo)
@@ -2213,7 +2327,7 @@ static int bnxt_re_net_stats_ctx_alloc(struct bnxt_re_dev *rdev, u16 tid)
 	bnxt_re_init_hwrm_hdr((void *)&req, HWRM_STAT_CTX_ALLOC, tid);
 	req.update_period_ms = cpu_to_le32(1000);
 	req.stats_dma_length = rdev->chip_ctx->hw_stats_size;
-	req.stats_dma_addr = cpu_to_le64(stat->dma_map);
+	req.stats_dma_addr = cpu_to_le64(stat->dma_handle);
 	req.stat_ctx_flags = STAT_CTX_ALLOC_REQ_STAT_CTX_FLAGS_ROCE;
 	bnxt_re_fill_fw_msg(&fw_msg, (void *)&req, sizeof(req), (void *)&resp,
 			    sizeof(resp), BNXT_RE_HWRM_CMD_TIMEOUT(rdev));
@@ -2247,7 +2361,7 @@ static void bnxt_re_net_unregister_async_event(struct bnxt_re_dev *rdev)
 
 	if (bnxt_register_async_events
 	    (rdev->en_dev, (unsigned long *)event_bitmap,
-	      ASYNC_EVENT_CMPL_EVENT_ID_DOORBELL_PACING_NQ_UPDATE))
+	      ASYNC_EVENT_CMPL_EVENT_ID_PEER_MMAP_CHANGE))
 		dev_err(rdev_to_dev(rdev),
 			"Failed to unregister async event");
 }
@@ -2265,11 +2379,12 @@ static void bnxt_re_net_register_async_event(struct bnxt_re_dev *rdev)
 
 	if (rdev->is_virtfn) {
 		event_bitmap[0] |= BIT(ASYNC_EVENT_CMPL_EVENT_ID_RESET_NOTIFY);
-		event_bitmap[2] |= BIT(ASYNC_EVENT_CMPL_EVENT_ID_ERROR_REPORT - 64);
+		event_bitmap[2] |= BIT(ASYNC_EVENT_CMPL_EVENT_ID_ERROR_REPORT - 64) |
+				   BIT(ASYNC_EVENT_CMPL_EVENT_ID_UDCC_SESSION_CHANGE - 64);
 
 		if (bnxt_register_async_events
 		    (rdev->en_dev, (unsigned long *)event_bitmap,
-		      ASYNC_EVENT_CMPL_EVENT_ID_ERROR_REPORT))
+		      ASYNC_EVENT_CMPL_EVENT_ID_UDCC_SESSION_CHANGE))
 			dev_err(rdev_to_dev(rdev),
 				"Failed to reg Async event");
 		return;
@@ -2279,11 +2394,13 @@ static void bnxt_re_net_register_async_event(struct bnxt_re_dev *rdev)
 			   BIT(ASYNC_EVENT_CMPL_EVENT_ID_RESET_NOTIFY);
 	event_bitmap[2] |= BIT(ASYNC_EVENT_CMPL_EVENT_ID_ERROR_REPORT - 64) |
 			   BIT(ASYNC_EVENT_CMPL_EVENT_ID_DOORBELL_PACING_THRESHOLD - 64) |
-			   BIT(ASYNC_EVENT_CMPL_EVENT_ID_DOORBELL_PACING_NQ_UPDATE - 64);
+			   BIT(ASYNC_EVENT_CMPL_EVENT_ID_DOORBELL_PACING_NQ_UPDATE - 64) |
+			   BIT(ASYNC_EVENT_CMPL_EVENT_ID_UDCC_SESSION_CHANGE - 64) |
+			   BIT(ASYNC_EVENT_CMPL_EVENT_ID_PEER_MMAP_CHANGE - 64);
 
 	if (bnxt_register_async_events
 	    (rdev->en_dev, (unsigned long *)event_bitmap,
-	      ASYNC_EVENT_CMPL_EVENT_ID_DOORBELL_PACING_NQ_UPDATE))
+	      ASYNC_EVENT_CMPL_EVENT_ID_PEER_MMAP_CHANGE))
 		dev_err(rdev_to_dev(rdev),
 			"Failed to reg Async event");
 }
@@ -2373,6 +2490,10 @@ int bnxt_re_hwrm_qcaps(struct bnxt_re_dev *rdev)
 	cctx->modes.udcc_supported =
 		(resp.flags_ext2 &
 		 FUNC_QCAPS_RESP_FLAGS_EXT2_UDCC_SUPPORTED) ?
+			true : false;
+	cctx->modes.multiple_llq =
+		(resp.flags_ext2 &
+		 FUNC_QCAPS_RESP_FLAGS_EXT2_MULTI_LOSSLESS_QUEUES_SUPPORTED) ?
 			true : false;
 	dev_dbg(rdev_to_dev(rdev),
 		"%s: cctx->modes dbr_pacing = %d dbr_pacing_ext = %d udcc = %d\n",
@@ -3210,12 +3331,14 @@ static void bnxt_re_dev_dealloc(struct bnxt_re_dev *rdev)
 	kfree(rdev->gid_map);
 #endif
 	kfree(rdev->dbg_stats);
+	kfree(rdev->d2p);
+	kfree(rdev->lossless_qid);
 	ib_dealloc_device(&rdev->ibdev);
 }
 
-static void bnxt_re_dbr_drop_recov_init(struct bnxt_re_dev *rdev)
+static void bnxt_re_res_list_init(struct bnxt_re_dev *rdev)
 {
-	struct bnxt_re_dbr_res_list *res;
+	struct bnxt_re_res_list *res;
 	int i;
 
 	for (i = 0; i < BNXT_RE_RES_TYPE_MAX; i++) {
@@ -3263,19 +3386,22 @@ static struct bnxt_re_dev *bnxt_re_dev_alloc(struct net_device *netdev,
 	rdev->gid_map = kzalloc(sizeof(*(rdev->gid_map)) *
 				  BNXT_RE_MAX_SGID_ENTRIES,
 				  GFP_KERNEL);
-	if (!rdev->gid_map) {
-		ib_dealloc_device(&rdev->ibdev);
-		return NULL;
-	}
+	if (!rdev->gid_map)
+		goto free_ibdev;
 	for(count = 0; count < BNXT_RE_MAX_SGID_ENTRIES; count++)
 		rdev->gid_map[count] = -1;
 #endif /* RDMA_CORE_CAP_PROT_ROCE_UDP_ENCAP */
 	rdev->dbg_stats = kzalloc(sizeof(*rdev->dbg_stats), GFP_KERNEL);
-	if (!rdev->dbg_stats) {
-		ib_dealloc_device(&rdev->ibdev);
-		return NULL;
-	}
-	bnxt_re_dbr_drop_recov_init(rdev);
+	if (!rdev->dbg_stats)
+		goto free_ibdev;
+	rdev->d2p = kcalloc(MAX_DSCP_PRI_TUPLE, sizeof(*(rdev->d2p)), GFP_KERNEL);
+	if (!rdev->d2p)
+		goto free_dbg_stats;
+	rdev->lossless_qid = kcalloc(MAX_LOSS_LESS_QUEUES, sizeof(*(rdev->lossless_qid)),
+				     GFP_KERNEL);
+	if (!rdev->lossless_qid)
+		goto free_d2p;
+	bnxt_re_res_list_init(rdev);
 	rdev->cq_coalescing.buf_maxtime = BNXT_QPLIB_CQ_COAL_DEF_BUF_MAXTIME;
 	if (BNXT_RE_CHIP_P7(en_dev->chip_num)) {
 		rdev->cq_coalescing.normal_maxbuf = BNXT_QPLIB_CQ_COAL_DEF_NORMAL_MAXBUF_P7;
@@ -3287,6 +3413,13 @@ static struct bnxt_re_dev *bnxt_re_dev_alloc(struct net_device *netdev,
 	rdev->cq_coalescing.en_ring_idle_mode = BNXT_QPLIB_CQ_COAL_DEF_EN_RING_IDLE_MODE;
 
 	return rdev;
+free_d2p:
+	kfree(rdev->d2p);
+free_dbg_stats:
+	kfree(rdev->dbg_stats);
+free_ibdev:
+	ib_dealloc_device(&rdev->ibdev);
+	return NULL;
 }
 
 static int bnxt_re_handle_unaffi_async_event(
@@ -3313,11 +3446,20 @@ static int bnxt_re_handle_unaffi_async_event(
 
 static int bnxt_re_handle_qp_async_event(void *qp_event, struct bnxt_re_qp *qp)
 {
-	struct bnxt_re_srq *srq = to_bnxt_re(qp->qplib_qp.srq, struct bnxt_re_srq,
-					     qplib_srq);
+	struct bnxt_re_srq *srq = NULL;
 	struct creq_qp_error_notification *err_event;
 	struct ib_event event;
 	unsigned int flags;
+
+	if (qp->qplib_qp.srq) {
+		srq = to_bnxt_re(qp->qplib_qp.srq, struct bnxt_re_srq,
+				 qplib_srq);
+		set_bit(SRQ_FLAGS_CAPTURE_SNAPDUMP, &srq->qplib_srq.flags);
+	}
+
+	set_bit(QP_FLAGS_CAPTURE_SNAPDUMP, &qp->qplib_qp.flags);
+	set_bit(CQ_FLAGS_CAPTURE_SNAPDUMP, &qp->scq->qplib_cq.flags);
+	set_bit(CQ_FLAGS_CAPTURE_SNAPDUMP, &qp->rcq->qplib_cq.flags);
 
 	if (qp->qplib_qp.state == CMDQ_MODIFY_QP_NEW_STATE_ERR &&
 	    !qp->qplib_qp.is_user) {
@@ -3716,8 +3858,7 @@ static void bnxt_re_clear_cc(struct bnxt_re_dev *rdev)
 	if (_is_chip_p7(rdev->chip_ctx)) {
 		cc_param->mask = CMDQ_MODIFY_ROCE_CC_MODIFY_MASK_TOS_DSCP;
 	} else {
-		cc_param->mask = (CMDQ_MODIFY_ROCE_CC_MODIFY_MASK_CC_MODE |
-				  CMDQ_MODIFY_ROCE_CC_MODIFY_MASK_ENABLE_CC |
+		cc_param->mask = (CMDQ_MODIFY_ROCE_CC_MODIFY_MASK_ENABLE_CC |
 				  CMDQ_MODIFY_ROCE_CC_MODIFY_MASK_TOS_ECN);
 
 		if (!is_qport_service_type_supported(rdev))
@@ -3742,12 +3883,8 @@ static int bnxt_re_setup_cc(struct bnxt_re_dev *rdev)
 	mutex_lock(&rdev->cc_lock);
 	/* set the default parameters for enabling CC */
 	cc_param->tos_ecn = 0x1;
-	cc_param->cc_mode = _is_chip_gen_p5_p7(rdev->chip_ctx) ?
-			    CMDQ_MODIFY_ROCE_CC_CC_MODE_PROBABILISTIC_CC_MODE :
-			    CMDQ_MODIFY_ROCE_CC_CC_MODE_DCTCP_CC_MODE;
 	cc_param->enable = 0x1;
-	cc_param->mask = (CMDQ_MODIFY_ROCE_CC_MODIFY_MASK_CC_MODE |
-			  CMDQ_MODIFY_ROCE_CC_MODIFY_MASK_ENABLE_CC |
+	cc_param->mask = (CMDQ_MODIFY_ROCE_CC_MODIFY_MASK_ENABLE_CC |
 			  CMDQ_MODIFY_ROCE_CC_MODIFY_MASK_TOS_ECN);
 
 	if (!is_qport_service_type_supported(rdev))
@@ -3792,7 +3929,6 @@ clear:
 }
 
 int bnxt_re_query_hwrm_dscp2pri(struct bnxt_re_dev *rdev,
-				struct bnxt_re_dscp2pri *d2p, u16 *count,
 				u16 target_id)
 {
 	struct hwrm_queue_dscp2pri_qcfg_input req = {};
@@ -3800,13 +3936,12 @@ int bnxt_re_query_hwrm_dscp2pri(struct bnxt_re_dev *rdev,
 	struct bnxt_en_dev *en_dev = rdev->en_dev;
 	struct bnxt_re_dscp2pri *dscp2pri;
 	struct bnxt_fw_msg fw_msg = {};
-	u16 in_count = *count;
 	dma_addr_t dma_handle;
+	u16 data_len, count;
 	int rc = 0, i;
-	u16 data_len;
 	u8 *kmem;
 
-	data_len = *count * sizeof(*dscp2pri);
+	data_len = MAX_DSCP_PRI_TUPLE * sizeof(*dscp2pri);
 	bnxt_re_init_hwrm_hdr((void *)&req, HWRM_QUEUE_DSCP2PRI_QCFG, target_id);
 	req.port_id = (target_id == 0xFFFF) ? en_dev->pf_port_id : 1;
 
@@ -3828,13 +3963,14 @@ int bnxt_re_query_hwrm_dscp2pri(struct bnxt_re_dev *rdev,
 
 	/* Upload the DSCP-MASK-PRI tuple(s) */
 	dscp2pri = (struct bnxt_re_dscp2pri *)kmem;
-	for (i = 0; i < le16_to_cpu(resp.entry_cnt) && i < in_count; i++) {
-		d2p[i].dscp = dscp2pri->dscp;
-		d2p[i].mask = dscp2pri->mask;
-		d2p[i].pri = dscp2pri->pri;
+	count = le16_to_cpu(resp.entry_cnt);
+	for (i = 0; i < count && i < MAX_DSCP_PRI_TUPLE; i++) {
+		rdev->d2p[i].dscp = dscp2pri->dscp;
+		rdev->d2p[i].mask = dscp2pri->mask;
+		rdev->d2p[i].pri = dscp2pri->pri;
 		dscp2pri++;
 	}
-	*count = le16_to_cpu(resp.entry_cnt);
+	rdev->d2p_count = count;
 out:
 	dma_free_coherent(&en_dev->pdev->dev, data_len, kmem, dma_handle);
 	return rc;
@@ -3902,9 +4038,10 @@ int bnxt_re_query_hwrm_qportcfg(struct bnxt_re_dev *rdev,
 	struct hwrm_queue_qportcfg_input req = {0};
 	struct bnxt_en_dev *en_dev = rdev->en_dev;
 	struct bnxt_fw_msg fw_msg = {};
+	u8 *tmp_type, cos_id, i = 0;
 	bool def_init = false;
-	u8 *tmp_type;
-	u8 cos_id;
+	bool def_roce = false;
+	bool def_cnp = false;
 	int rc;
 
 	bnxt_re_init_hwrm_hdr((void *)&req, HWRM_QUEUE_QPORTCFG, tid);
@@ -3930,6 +4067,7 @@ int bnxt_re_query_hwrm_qportcfg(struct bnxt_re_dev *rdev,
 	qptr = &resp.queue_id0;
 	type_ptr0 = &resp.queue_id0_service_profile_type;
 	type_ptr1 = &resp.queue_id1_service_profile_type;
+	rdev->lossless_q_count = 0;
 	for (tc = 0; tc < max_tc; tc++) {
 		tmp_type = tc ? type_ptr1 + (tc - 1) : type_ptr0;
 
@@ -3938,11 +4076,20 @@ int bnxt_re_query_hwrm_qportcfg(struct bnxt_re_dev *rdev,
 		 * For MP12 and MP17 order is 405 and 141015.
 		 */
 		if (is_bnxt_roce_queue(rdev, *qptr, *tmp_type)) {
-			tc_rec->cos_id_roce = cos_id;
-			tc_rec->tc_roce = tc;
+			if (!def_roce) {
+				tc_rec->cos_id_roce = cos_id;
+				tc_rec->tc_roce = tc;
+				def_roce = true;
+			}
+			rdev->lossless_qid[i] = cos_id;
+			rdev->lossless_q_count++;
+			i++;
 		} else if (is_bnxt_cnp_queue(rdev, *qptr, *tmp_type)) {
-			tc_rec->cos_id_cnp = cos_id;
-			tc_rec->tc_cnp = tc;
+			if (!def_cnp) {
+				tc_rec->cos_id_cnp = cos_id;
+				tc_rec->tc_cnp = tc;
+				def_cnp = true;
+			}
 		} else if (!def_init) {
 			def_init = true;
 			tc_rec->tc_def = tc;
@@ -4061,6 +4208,7 @@ int bnxt_re_hwrm_pri2cos_qcfg(struct bnxt_re_dev *rdev,
 			tc_rec->roce_prio = i;
 			tc_rec->prio_valid |= (1 << ROCE_PRIO_VALID);
 		}
+		rdev->p2cos[i] = pri2cos[i];
 	}
 	return rc;
 }
@@ -4476,14 +4624,6 @@ static void bnxt_re_worker(struct work_struct *work)
 		mutex_unlock(&bnxt_re_mutex);
 	}
 
-	if (!rdev->is_virtfn && !test_bit(BNXT_RE_FLAG_INIT_DCBX_PARAM_ATTEMPTED, &rdev->flags)) {
-		rc = bnxt_re_init_dcbx_cc_param(rdev);
-		if (rc)
-			dev_err(rdev_to_dev(rdev), "Failed to initialize Flow control");
-		else
-			set_bit(BNXT_RE_FLAG_INIT_DCBX_CC_PARAM, &rdev->flags);
-	}
-
 	if (rdev->binfo) {
 		if (!test_bit(BNXT_RE_FLAG_IBDEV_REGISTERED, &rdev->flags))
 			goto resched;
@@ -4499,11 +4639,6 @@ static void bnxt_re_worker(struct work_struct *work)
 				bnxt_re_update_fw_lag_info(rdev->binfo, rdev,
 							   true);
 			}
-		}
-		if (test_bit(BNXT_RE_FLAG_RECONFIG_SECONDARY_DEV_DCB, &rdev->flags)) {
-			rc = bnxt_re_setup_dcb(rdev, rdev->binfo->slave2, &rdev->tc_rec[1], 2);
-			if (!rc || rc != -EBUSY)
-				clear_bit(BNXT_RE_FLAG_RECONFIG_SECONDARY_DEV_DCB, &rdev->flags);
 		}
 	}
 
@@ -4521,6 +4656,9 @@ static void bnxt_re_worker(struct work_struct *work)
 					  &rdev->flags);
 			}
 	}
+
+	if (test_bit(BNXT_RE_FLAG_ISSUE_ROCE_STATS, &rdev->flags))
+		bnxt_re_get_roce_data_stats(rdev);
 
 resched:
 	schedule_delayed_work(&rdev->worker, msecs_to_jiffies(1000));
@@ -4689,6 +4827,12 @@ int bnxt_re_disable_dbr_pacing(struct bnxt_re_dev *rdev)
 	return rc;
 }
 
+static void bnxt_re_uninit_mmap_work(struct bnxt_re_dev *rdev)
+{
+	if (delayed_work_pending(&rdev->peer_mmap_work))
+		cancel_delayed_work_sync(&rdev->peer_mmap_work);
+}
+
 static void bnxt_re_clean_qpdump(struct bnxt_re_dev *rdev)
 {
 	struct qdump_array *qdump;
@@ -4759,6 +4903,8 @@ static void bnxt_re_dev_uninit(struct bnxt_re_dev *rdev, u8 op_type)
 	bnxt_re_uninit_resolve_wq(rdev);
 	bnxt_re_uninit_dcb_wq(rdev);
 	bnxt_re_uninit_aer_wq(rdev);
+	bnxt_re_uninit_udcc_wq(rdev);
+	bnxt_re_uninit_mmap_work(rdev);
 	bnxt_re_deinitialize_dbr_drop_recov(rdev);
 
 	if (bnxt_qplib_dbr_pacing_en(rdev->chip_ctx))
@@ -4873,6 +5019,7 @@ static int bnxt_re_init_qpdump(struct bnxt_re_dev *rdev)
 {
 	rdev->qdump_head.max_elements = BNXT_RE_MAX_QDUMP_ENTRIES;
 	rdev->qdump_head.index = 0;
+	rdev->snapdump_dbg_lvl = BNXT_RE_SNAPDUMP_ERR;
 	mutex_init(&rdev->qdump_head.lock);
 	rdev->qdump_head.qdump = vzalloc(rdev->qdump_head.max_elements *
 					 sizeof(struct qdump_array));
@@ -5080,6 +5227,13 @@ static int bnxt_re_dev_init(struct bnxt_re_dev *rdev, u8 op_type, u8 wqe_mode)
 		if (rc)
 			dev_warn(rdev_to_dev(rdev),
 				 "Failed to query CC defaults\n");
+
+		rc = bnxt_re_init_cc_param(rdev);
+		if (rc)
+			dev_err(rdev_to_dev(rdev), "Failed to initialize Flow control");
+		else
+			set_bit(BNXT_RE_FLAG_INIT_CC_PARAM, &rdev->flags);
+
 		if (_is_chip_gen_p5_p7(rdev->chip_ctx) &&
 		    !(rdev->qplib_res.en_dev->flags & BNXT_EN_FLAG_ROCE_VF_RES_MGMT))
 			bnxt_re_vf_res_config(rdev);
@@ -5091,6 +5245,7 @@ static int bnxt_re_dev_init(struct bnxt_re_dev *rdev, u8 op_type, u8 wqe_mode)
 	bnxt_re_init_dcb_wq(rdev);
 	bnxt_re_init_aer_wq(rdev);
 	bnxt_re_init_resolve_wq(rdev);
+	bnxt_re_init_udcc_wq(rdev);
 	bnxt_re_debugfs_add_pdev(rdev);
 	list_add_tail_rcu(&rdev->list, &bnxt_re_dev_list);
 	set_bit(BNXT_RE_FLAG_DEV_LIST_INITIALIZED, &rdev->flags);
@@ -5337,8 +5492,8 @@ void bnxt_re_remove_device(struct bnxt_re_dev *rdev, u8 op_type,
 	 * In future, this call can be removed completely from the driver.
 	 */
 	if (op_type != BNXT_RE_PRE_RECOVERY_REMOVE) {
-		if (test_and_clear_bit(BNXT_RE_FLAG_INIT_DCBX_CC_PARAM, &rdev->flags))
-			bnxt_re_clear_dcbx_cc_param(rdev);
+		if (test_and_clear_bit(BNXT_RE_FLAG_INIT_CC_PARAM, &rdev->flags))
+			bnxt_re_clear_cc_param(rdev);
 	}
 	bnxt_re_dev_uninit(rdev, op_type);
 	en_info = auxiliary_get_drvdata(aux_dev);
@@ -5355,13 +5510,41 @@ void bnxt_re_remove_device(struct bnxt_re_dev *rdev, u8 op_type,
 	bnxt_re_dev_unreg(rdev);
 }
 
+static void bnxt_re_update_en_info_rdev(struct bnxt_re_dev *rdev,
+					struct bnxt_re_en_dev_info *en_info,
+					struct bnxt_re_bond_info *binfo)
+{
+	struct bnxt_en_dev *en_dev = en_info->en_dev;
+	struct bnxt_re_en_dev_info *en_info2 = NULL;
+
+	/* Before updating the rdev pointer in bnxt_re_en_dev_info structure,
+	 * take the rtnl lock to avoid accessing invalid rdev pointer from
+	 * L2 ULP callbacks. This is applicable in all the places where rdev
+	 * pointer is updated in bnxt_re_en_dev_info.
+	 */
+	rtnl_lock();
+	en_info->rdev = rdev;
+	/*
+	 * If this is a bond interface, update second aux_dev's
+	 * en_info->rdev also with this newly created rdev
+	 */
+	if (binfo && !BNXT_EN_HW_LAG(en_dev)) {
+		if (binfo->aux_dev2)
+			en_info2 = auxiliary_get_drvdata(binfo->aux_dev2);
+
+		if (en_info2)
+			en_info2->rdev = rdev;
+	}
+	rtnl_unlock();
+}
+
 int bnxt_re_add_device(struct bnxt_re_dev **rdev,
 		       struct net_device *netdev,
 		       struct bnxt_re_bond_info *info,
 		       u8 qp_mode, u8 op_type, u8 wqe_mode,
 		       struct auxiliary_device *aux_dev)
 {
-	struct bnxt_re_en_dev_info *en_info, *en_info2 = NULL;
+	struct bnxt_re_en_dev_info *en_info;
 	struct bnxt_en_dev *en_dev;
 	int rc = 0;
 
@@ -5385,30 +5568,16 @@ int bnxt_re_add_device(struct bnxt_re_dev **rdev,
 	wqe_mode = (info && wqe_mode == BNXT_QPLIB_WQE_MODE_INVALID) ?
 		    info->wqe_mode : wqe_mode;
 	(*rdev)->adev = aux_dev;
+	bnxt_re_update_en_info_rdev(*rdev, en_info, info);
 	rc = bnxt_re_dev_init(*rdev, op_type, wqe_mode);
 	if (rc) {
 		bnxt_re_dev_unreg(*rdev);
+		*rdev = NULL;
+		bnxt_re_update_en_info_rdev(*rdev, en_info, info);
 		return rc;
 	}
-	/* Before updating the rdev pointer in bnxt_re_en_dev_info structure,
-	 * take the rtnl lock to avoid accessing invalid rdev pointer from
-	 * L2 ULP callbacks. This is applicable in all the places where rdev
-	 * pointer is updated in bnxt_re_en_dev_info.
-	 */
-	rtnl_lock();
-	en_info->rdev = *rdev;
-	/*
-	 * If this is a bond interface, update second aux_dev's
-	 * en_info->rdev also with this newly created rdev
-	 */
-	if (info) {
-		if (info->aux_dev2)
-			en_info2 = auxiliary_get_drvdata(info->aux_dev2);
 
-		if (en_info2)
-			en_info2->rdev = *rdev;
-	}
-	rtnl_unlock();
+	bnxt_re_get_bar_maps(*rdev);
 	dev_dbg(rdev_to_dev(*rdev), "%s: Added rdev: %p\n", __func__, *rdev);
 	set_bit(BNXT_RE_FLAG_EN_DEV_NETDEV_REG, &en_info->flags);
 	return 0;
@@ -5773,6 +5942,22 @@ static void bond_fill_ifslave(struct slave *slave, struct ifslave *info)
 	info->link_failure_count = slave->link_failure_count;
 }
 
+static struct bnxt_re_bond_info *binfo_from_2nd_ndev(struct net_device *netdev)
+{
+	struct bnxt_re_bond_info *binfo = NULL;
+	struct bnxt_re_dev *rdev;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(rdev, &bnxt_re_dev_list, list) {
+		if (rdev->binfo && rdev->binfo->slave2 == netdev) {
+			binfo = rdev->binfo;
+			break;
+		}
+	}
+	rcu_read_unlock();
+	return binfo;
+}
+
 static int bnxt_re_check_and_create_bond(struct net_device *netdev)
 {
 	struct netdev_bonding_info binfo = {};
@@ -5811,7 +5996,7 @@ static int bnxt_re_check_and_create_bond(struct net_device *netdev)
 	return rc;
 }
 
-static void bnxt_re_clear_dcbx_cc_param(struct bnxt_re_dev *rdev)
+static void bnxt_re_clear_cc_param(struct bnxt_re_dev *rdev)
 {
 	struct bnxt_qplib_cc_param *cc_param = &rdev->cc_param;
 	struct bnxt_re_tc_rec *tc_rec;
@@ -5830,11 +6015,6 @@ static void bnxt_re_clear_dcbx_cc_param(struct bnxt_re_dev *rdev)
 	rc = bnxt_re_hwrm_pri2cos_qcfg(rdev, tc_rec, -1);
 	if (!rc)
 		cc_param->roce_pri = tc_rec->roce_prio;
-	bnxt_re_clear_dcb(rdev, rdev->en_dev->net, tc_rec);
-	if (!_is_chip_p7(rdev->chip_ctx) && rdev->binfo) {
-		tc_rec = &rdev->tc_rec[1];
-		bnxt_re_clear_dcb(rdev, rdev->binfo->slave2, tc_rec);
-	}
 	cc_param->alt_tos_dscp = 0;
 	cc_param->alt_vlan_pcp = 0;
 	cc_param->tos_dscp = 0;
@@ -5842,16 +6022,9 @@ static void bnxt_re_clear_dcbx_cc_param(struct bnxt_re_dev *rdev)
 	cc_param->qp1_tos_dscp = 0;
 }
 
-int bnxt_re_init_dcbx_cc_param(struct bnxt_re_dev *rdev)
+static int bnxt_re_init_cc_param(struct bnxt_re_dev *rdev)
 {
 	struct bnxt_qplib_cc_param *cc_param = &rdev->cc_param;
-	struct bnxt_re_tc_rec *tc_rec;
-	int rc;
-
-	/* This flag is used to invoke bnxt_re_init_dcbx_cc_param only once
-	 * from the bnxt_re_worker
-	 */
-	set_bit(BNXT_RE_FLAG_INIT_DCBX_PARAM_ATTEMPTED, &rdev->flags);
 
 	/* Set the  default values of dscp and pri values for RoCE and CNP */
 	cc_param->alt_tos_dscp = BNXT_RE_DEFAULT_CNP_DSCP;
@@ -5859,35 +6032,12 @@ int bnxt_re_init_dcbx_cc_param(struct bnxt_re_dev *rdev)
 	cc_param->tos_dscp = BNXT_RE_DEFAULT_ROCE_DSCP;
 	cc_param->roce_pri = BNXT_RE_DEFAULT_ROCE_PRI;
 
-	tc_rec = &rdev->tc_rec[0];
-	rc = bnxt_re_setup_dcb(rdev, rdev->en_dev->net, tc_rec, 0xFFFF);
-	if (rc)
-		return rc;
-	if (rdev->binfo) {
-		tc_rec = &rdev->tc_rec[1];
-		rc = bnxt_re_setup_dcb(rdev, rdev->binfo->slave2, tc_rec, 2);
-		if (rc) {
-			if (rc == -EBUSY)
-				set_bit(BNXT_RE_FLAG_RECONFIG_SECONDARY_DEV_DCB, &rdev->flags);
-			else
-				goto clear_port0;
-		}
-	}
-
 	/* CC is not enabled on non p5 adapters at 10G speed */
 	if (rdev->sl_espeed == SPEED_10000 &&
 	    !_is_chip_gen_p5_p7(rdev->chip_ctx))
 		return 0;
 
-	rc = bnxt_re_setup_cc(rdev);
-	if (rc)
-		goto clear_port1;
-	return 0;
-clear_port1:
-	bnxt_re_clear_dcb(rdev, rdev->en_dev->net, &rdev->tc_rec[1]);
-clear_port0:
-	bnxt_re_clear_dcb(rdev, rdev->en_dev->net, &rdev->tc_rec[0]);
-	return rc;
+	return bnxt_re_setup_cc(rdev);
 }
 
 /* Handle all deferred netevents tasks */
@@ -5895,6 +6045,7 @@ static void bnxt_re_task(struct work_struct *work)
 {
 	struct netdev_bonding_info *netdev_binfo = NULL;
 	struct bnxt_re_bond_info bkup_binfo;
+	struct bnxt_re_dcb_work *dcb_work;
 	struct bnxt_re_work *re_work;
 	struct bonding *b_master;
 	struct bnxt_re_dev *rdev;
@@ -5916,6 +6067,9 @@ static void bnxt_re_task(struct work_struct *work)
 	 */
 	if (!bnxt_re_is_rdev_valid(rdev))
 		goto exit;
+
+	/* Get the latest peer memory map, in cases where the async notification is lost*/
+	bnxt_re_get_bar_maps(rdev);
 
 	/* Ignore the event, if the device is not registered with IB stack. This
 	 * is to avoid handling any event while the device is added/removed.
@@ -5940,6 +6094,12 @@ static void bnxt_re_task(struct work_struct *work)
 		bnxt_re_dispatch_event(&rdev->ibdev, NULL, 1,
 				       IB_EVENT_PORT_ACTIVE);
 		bnxt_re_net_register_async_event(rdev);
+		dcb_work = kzalloc(sizeof(*dcb_work), GFP_ATOMIC);
+		if (!dcb_work)
+			break;
+		dcb_work->rdev = rdev;
+		INIT_WORK(&dcb_work->work, bnxt_re_dcb_wq_task);
+		queue_work(rdev->dcb_wq, &dcb_work->work);
 		break;
 
 	case NETDEV_DOWN:
@@ -6350,8 +6510,8 @@ static AUDEV_REM_RET bnxt_re_remove(struct auxiliary_device *adev)
 
 	en_dev = en_info->en_dev;
 
-	mutex_lock(&bnxt_re_mutex);
 	mutex_lock(&en_dev->en_dev_lock);
+	mutex_lock(&bnxt_re_mutex);
 	rdev = en_info->rdev;
 
 	if (rdev && bnxt_re_is_rdev_valid(rdev)) {
@@ -6387,8 +6547,8 @@ static AUDEV_REM_RET bnxt_re_remove(struct auxiliary_device *adev)
 			bnxt_unregister_dev(en_dev);
 	}
 	kfree(en_info);
-	mutex_unlock(&en_dev->en_dev_lock);
 	mutex_unlock(&bnxt_re_mutex);
+	mutex_unlock(&en_dev->en_dev_lock);
 #ifdef HAVE_AUDEV_REM_RET_INT
 	return 0;
 #else
@@ -6446,6 +6606,7 @@ static int bnxt_re_probe(struct auxiliary_device *adev,
 
 	auxiliary_set_drvdata(adev, en_info);
 
+	mutex_lock(&en_dev->en_dev_lock);
 	mutex_lock(&bnxt_re_mutex);
 	rc = bnxt_re_add_device(&rdev, en_dev->net, NULL,
 				BNXT_RE_GSI_MODE_ALL,
@@ -6455,6 +6616,7 @@ static int bnxt_re_probe(struct auxiliary_device *adev,
 	if (rc) {
 		kfree(en_info);
 		mutex_unlock(&bnxt_re_mutex);
+		mutex_unlock(&en_dev->en_dev_lock);
 		return rc;
 	}
 
@@ -6463,6 +6625,9 @@ static int bnxt_re_probe(struct auxiliary_device *adev,
 		goto err;
 
 	bnxt_re_ib_init_2(rdev);
+	rc = bnxt_re_get_pri_dscp_settings(rdev, -1, rdev->tc_rec);
+	if (rc)
+		goto err;
 
 	dev_dbg(rdev_to_dev(rdev), "%s: adev: %p wqe_mode: %s\n", __func__, adev,
 		(en_info->wqe_mode == BNXT_QPLIB_WQE_MODE_VARIABLE) ?
@@ -6473,11 +6638,13 @@ static int bnxt_re_probe(struct auxiliary_device *adev,
 		dev_dbg(rdev_to_dev(rdev), "%s: failed to create lag. rc = %d",
 			__func__, rc);
 	mutex_unlock(&bnxt_re_mutex);
+	mutex_unlock(&en_dev->en_dev_lock);
 
 	return 0;
 
 err:
 	mutex_unlock(&bnxt_re_mutex);
+	mutex_unlock(&en_dev->en_dev_lock);
 	bnxt_re_remove(adev);
 
 	return rc;

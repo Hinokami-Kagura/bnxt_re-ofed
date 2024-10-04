@@ -94,7 +94,7 @@ struct bnxt_re_ah {
 
 struct bnxt_re_srq {
 	struct ib_srq		ib_srq;
-	struct list_head	dbr_list;
+	struct list_head	res_list;
 	struct list_head	srq_list;
 	struct bnxt_re_ucontext *uctx;
 	struct bnxt_re_dev	*rdev;
@@ -123,13 +123,17 @@ struct bnxt_re_qp_info_entry {
 struct bnxt_re_qp {
 	struct ib_qp		ib_qp;
 	struct list_head	list;
-	struct list_head	dbr_list;
+	struct list_head	res_list;
 	struct bnxt_re_dev	*rdev;
 	spinlock_t		sq_lock;
 	spinlock_t		rq_lock;
 	struct bnxt_qplib_qp	qplib_qp;
 	struct ib_umem		*sumem;
 	struct ib_umem		*rumem;
+	struct ib_umem		*sqprod;
+	struct ib_umem		*sqcons;
+	struct ib_umem		*rqprod;
+	struct ib_umem		*rqcons;
 	/* QP1 */
 	u32			send_psn;
 	struct ib_ud_header	qp1_hdr;
@@ -143,7 +147,7 @@ struct bnxt_re_qp {
 
 struct bnxt_re_cq {
 	struct ib_cq		ib_cq;
-	struct list_head	dbr_list;
+	struct list_head	res_list;
 	struct list_head	cq_list;
 	struct bnxt_re_dev	*rdev;
 	struct bnxt_re_ucontext *uctx;
@@ -163,10 +167,13 @@ struct bnxt_re_cq {
 	void			*dbr_recov_cq_page;
 	bool			is_dbr_soft_cq;
 	bool			is_snapdump_captured;
+	struct ib_umem		*cqprod;
+	struct ib_umem		*cqcons;
 };
 
 struct bnxt_re_mr {
 	struct bnxt_re_dev	*rdev;
+	struct list_head	res_list;
 	struct ib_mr		ib_mr;
 	struct ib_umem		*ib_umem;
 	struct bnxt_qplib_mrw	qplib_mr;
@@ -180,6 +187,7 @@ struct bnxt_re_mr {
 	struct completion	invalidation_comp;
 #endif
 	bool                    is_invalcb_active;
+	bool			is_dmabuf;
 };
 
 struct bnxt_re_frpl {
@@ -215,7 +223,7 @@ struct bnxt_re_vma_data {
 struct bnxt_re_ucontext {
 	struct ib_ucontext	ib_uctx;
 	struct bnxt_re_dev	*rdev;
-	struct list_head	dbr_list;
+	struct list_head	res_list;
 	struct list_head	cq_list;
 	struct list_head	srq_list;
 	struct bnxt_qplib_dpi	dpi;

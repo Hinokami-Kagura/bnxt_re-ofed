@@ -43,5 +43,7 @@ extern struct list_head bnxt_re_dev_list;
 
 void bnxt_re_debugfs_init(void);
 void bnxt_re_debugfs_remove(void);
+void bnxt_re_debugfs_create_udcc_session(struct bnxt_re_dev *rdev, u32 session_id);
+void bnxt_re_debugfs_delete_udcc_session(struct bnxt_re_dev *rdev, u32 session_id);
 
 #endif

@@ -17,10 +17,11 @@ Usage: $(basename "$0") [OPTION]...
   -p VALUE    RoCE CNP Packet DSCP Value
   -b VALUE    RoCE Bandwidth percentage for ETS configuration - Default is 50%
   -t [2]      Default mode (Only RoCE v2 is supported - Input Ignored)
+  -C VALUE    Set CNP Service Type
   -u [1-3]    Utility to configure QoS settings
-	      1 - Use bnxtqos utility (default)
-              2 - Use lldptool
-	      3 - Use Broadcom niccli utility
+	      1 - Use bnxtqos utility. Will disable lldptool if enabled. (default)
+	      2 - Use lldptool
+	      3 - Use Broadcom niccli utility. Will disable lldptool if enabled.
   -h          display help
 EOM
 exit 2
@@ -28,7 +29,7 @@ exit 2
 
 MAX_INTERFACE_COUNT=2
 
-while getopts ":r:s:c:p:i:d:v:m:b:t:u:h" o; do
+while getopts ":r:s:c:p:i:d:v:C:m:b:t:u:h" o; do
     case "${o}" in
         r)
             r=${OPTARG}
@@ -50,6 +51,9 @@ while getopts ":r:s:c:p:i:d:v:m:b:t:u:h" o; do
             ;;
         v)
             v=${OPTARG}
+            ;;
+	C)
+            CNP_SERVICE_TYPE=${OPTARG}
             ;;
         m)
             m=${OPTARG}
@@ -237,7 +241,7 @@ then
   exit 1
 fi
 
-INF_MACADDR1=`cat /sys/class/net/${INF_NAME1}/address`
+PCI_BUS_ADDR1=$(ethtool -i ${INF_NAME1} | grep 'bus-info' | awk '{print $2}')
 
 if [ "$INF_NAME2" != "" ];
 then
@@ -247,7 +251,7 @@ then
     exit 1
   fi
 
-  INF_MACADDR2=`cat /sys/class/net/${INF_NAME2}/address`
+  PCI_BUS_ADDR2=$(ethtool -i ${INF_NAME2} | grep 'bus-info' | awk '{print $2}')
 fi
 
 if [ -z $m ]
@@ -320,9 +324,13 @@ echo L2 $L2_BW RoCE $ROCE_BW
 
 echo "Using Ethernet interface $INF_NAME1  $INF_NAME2 and RoCE interface $DEV_NAME"
 
-CNP_SERVICE_TYPE=0
-if test -f "/sys/kernel/debug/bnxt_re/$DEV_NAME/info"; then
-	CNP_SERVICE_TYPE=`cat /sys/kernel/debug/bnxt_re/$DEV_NAME/info|grep fw_service_prof_type_sup|awk '{print $3}'`
+if [ "$CNP_SERVICE_TYPE" == "1" ]; then
+        echo "CNP_SERVICE_TYPE is set to 1"
+else
+        CNP_SERVICE_TYPE=0
+        if test -f "/sys/kernel/debug/bnxt_re/$DEV_NAME/info"; then
+                CNP_SERVICE_TYPE=`cat /sys/kernel/debug/bnxt_re/$DEV_NAME/info|grep fw_service_prof_type_sup|awk '{print $3}'`
+        fi
 fi
 
 # Define priority 2 tc mapping
@@ -341,13 +349,9 @@ done
 
 pri2tc=${pri2tc:1}
 
-ethtool $INF_NAME1
-ethtool -i $INF_NAME1
 ethtool -A $INF_NAME1 rx off tx off
 if [ "$INF_NAME2" != "" ];
 then
-    ethtool $INF_NAME2
-    ethtool -i $INF_NAME2
     ethtool -A $INF_NAME2 rx off tx off
 fi
 
@@ -387,9 +391,9 @@ lldptool_rem_app_tlvs() {
 }
 
 niccli_rem_app_tlv() {
-	INF_MACADDR=$1
+	PCI_BUSADDR=$1
 	j=0
-	for i in `niccli -dev $INF_MACADDR getqos|grep -e \
+	for i in `niccli -dev $PCI_BUSADDR getqos|grep -e \
                   "Priority:" -e "Sel:" -e DSCP -e UDP -e "Ethertype:"|awk -F":" '{ print $2}'`
 	do
 		if [ $i == 0x8915 ]
@@ -408,7 +412,7 @@ niccli_rem_app_tlv() {
 
 	if [ $j -eq 3 ]
 	then
-		niccli -dev $INF_MACADDR set_apptlv -d app=$APP_0
+		niccli -dev $PCI_BUSADDR set_apptlv -d app=$APP_0
 		j=0
 	fi
 	done
@@ -480,55 +484,49 @@ lldptool_pgm_pfc_ets() {
 }
 
 niccli_pgm_pfc_ets() {
-	INF_MACADDR=$1
-	echo "Setting pfc/ets $INF_MACADDR"
-
-	niccli_rem_app_tlv $INF_MACADDR
-
+	PCI_BUSADDR=$1
+	echo "Setting pfc/ets $PCI_BUSADDR"
+	if [[ -z "${RUN_SETUP_SCRIPT}" ]]; then
+		niccli_rem_app_tlv $PCI_BUSADDR
+	fi
 	if [ $CNP_SERVICE_TYPE -eq 1 ]
 	then
 		niccli \
-                    -dev $INF_MACADDR set_ets \
-                    tsa=0:ets,1:ets,2:strict,3:strict,4:strict,5:strict,6:strict,7:strict \
+                    -dev $PCI_BUSADDR set_ets \
+                    tsa=0:ets,1:ets,2:strict \
                     priority2tc=$pri2tc \
                     tcbw=$L2_BW,$ROCE_BW > /dev/null 2>&1
 		if [ $? -ne 0 ]
                 then
-                        echo " Does not support 8 TCs. Configuring 3 TCs "
-                        niccli -dev $INF_MACADDR set_ets \
-                            tsa=0:ets,1:ets,2:strict \
+                        echo "Setting 3 TCs failed. Trying 8 TCs now"
+                        niccli -dev $PCI_BUSADDR set_ets \
+                            tsa=0:ets,1:ets,2:strict,3:strict,4:strict,5:strict,6:strict,7:strict \
                             priority2tc=$pri2tc tcbw=$L2_BW,$ROCE_BW
                 fi
 
 	else
-		niccli -dev $INF_MACADDR set_ets tsa=0:ets,1:ets \
+		niccli -dev $PCI_BUSADDR set_ets tsa=0:ets,1:ets \
                     priority2tc=$pri2tc tcbw=$L2_BW,$ROCE_BW
 	fi
 
 	if [ ! -z "$ROCE_PRI" ] && [ $ENABLE_PFC -eq 1 ]
 	then
-		niccli -dev $INF_MACADDR set_pfc enabled=`printf "%d" $ROCE_PRI`
-		sleep 1
-		niccli -dev $INF_MACADDR set_apptlv app=`printf "%d" $ROCE_PRI`,3,4791
-		sleep 1
+		niccli -dev $PCI_BUSADDR set_pfc enabled=`printf "%d" $ROCE_PRI`
+		niccli -dev $PCI_BUSADDR set_apptlv app=`printf "%d" $ROCE_PRI`,3,4791
 	else
-		niccli -dev $INF_MACADDR set_pfc enabled=none
+		niccli -dev $PCI_BUSADDR set_pfc enabled=none
 	fi
 
 	if [ $ENABLE_DSCP_BASED_PFC -eq 1 ] || [ $EN_ROCE_DSCP -eq 1 ]
 	then
-		niccli -dev $INF_MACADDR set_apptlv \
+		niccli -dev $PCI_BUSADDR set_apptlv \
                     app=`printf "%d" $ROCE_PRI`,5,`printf "%d" $ROCE_DSCP`
-		sleep 1
 	fi
 	if [ $ENABLE_CC -eq 1 ] &&  [ $CNP_SERVICE_TYPE -eq 1 ]
 	then
-		niccli -dev $INF_MACADDR set_apptlv \
+		niccli -dev $PCI_BUSADDR set_apptlv \
                     app=`printf "%d" $ROCE_CNP_PRI`,5,`printf "%d" $ROCE_CNP_DSCP`
-		sleep 1
 	fi
-	sleep 1
-	niccli -dev $INF_MACADDR getqos
 }
 
 if [ $QOS_TOOL -eq 1 ]
@@ -543,10 +541,9 @@ then
     STATUS="$(systemctl is-active lldpad)"
     if [ "${STATUS}" = "active" ]; then
         #Stop lldpad
-        echo "Disabling lldpad service, and using bnxtqos tool for configuration"
+        echo "WARNING: Disabling lldpad service, and using bnxtqos tool for configuration"
+        echo "  bnxtqos and lldptool cannot both run. Use bnxtqos to configure all ports."
         systemctl stop lldpad.service
-    else
-        echo "check if lldpad service is running : no action needed"
     fi
 
     bnxt_qos_pgm_pfc_ets $INF_NAME1
@@ -567,17 +564,15 @@ then
     STATUS="$(systemctl is-active lldpad)"
     if [ "${STATUS}" = "active" ]; then
         #Stop lldpad
-        echo "Disabling lldpad service, and using bnxtqos tool for configuration"
+        echo "WARNING: Disabling lldpad service, and using niccli tool for configuration"
+        echo "  niccli and lldptool cannot both run. Use niccli to configure all ports."
         systemctl stop lldpad.service
-    else
-        echo "check if lldpad service is running : no action needed"
     fi
 
-	if [ "$INF_NAME2" == "" ];
+	niccli_pgm_pfc_ets $PCI_BUS_ADDR1
+	if [ "$INF_NAME2" != "" ];
 	then
-		niccli_pgm_pfc_ets $INF_MACADDR1
-	else
-		niccli_pgm_pfc_ets $INF_MACADDR2
+		niccli_pgm_pfc_ets $PCI_BUS_ADDR2
 	fi
 
 else
@@ -604,6 +599,63 @@ else
     systemctl restart lldpad.service
 fi
 
+if [ "$CNP_SERVICE_TYPE" == "0" ]; then
+	PREVDIR=`pwd`
+	mkdir -p /sys/kernel/config/bnxt_re/$DEV_NAME
+	cd /sys/kernel/config/bnxt_re/$DEV_NAME/ports/1/cc/
+
+	#Disabling prio vlan insertion if dscp based pfc is enabled
+	if [ $ENABLE_DSCP_BASED_PFC -eq 1 ]
+	then
+		echo -n 0x1 > disable_prio_vlan_tx
+	else
+		echo -n 0x0 > disable_prio_vlan_tx
+	fi
+
+	if [ $ENABLE_CC -eq 1 ]
+	then
+		echo "Setting up CC Settings"
+		echo -n 0x1 > ecn_marking
+		echo -n 0x1 > ecn_enable
+		echo -n 1 > cc_mode
+	else
+		echo -n 0x0 > ecn_marking
+		echo -n 0x0 > ecn_enable
+	fi
+
+	if [ ! -z "$ROCE_CNP_PRI" ]
+	then
+		echo -n $ROCE_CNP_PRI > cnp_prio
+	fi
+	if [ ! -z "$ROCE_PRI" ]
+	then
+		echo -n $ROCE_PRI > roce_prio
+	fi
+
+	if [ $ENABLE_DSCP -eq 1 ]
+	then
+		echo "Setting up DSCP/PRI"
+		if [ ! -z "$ROCE_DSCP" ]
+		then
+			echo -n $ROCE_DSCP > roce_dscp
+		fi
+		if [ ! -z "$ROCE_CNP_DSCP" ]
+		then
+			echo -n $ROCE_CNP_DSCP > cnp_dscp
+		fi
+	fi
+	echo -n 0x1 > apply
+
+	cd $PREVDIR
+	rmdir -p /sys/kernel/config/bnxt_re/$DEV_NAME
+	echo "Completed Configuration"
+fi
+
+if [ -n "${RUN_SETUP_SCRIPT}" ]; then
+    echo "Complete"
+    exit 0
+fi
+
 echo "Settings Default to use RoCE-v$ROCE_MODE"
 mkdir -p /sys/kernel/config/rdma_cm/$DEV_NAME
 echo "RoCE v2" > /sys/kernel/config/rdma_cm/$DEV_NAME/ports/1/default_roce_mode
@@ -613,55 +665,4 @@ then
 else
 	echo -n 0 > /sys/kernel/config/rdma_cm/$DEV_NAME/ports/1/default_roce_tos
 fi
-PREVDIR=`pwd`
-mkdir -p /sys/kernel/config/bnxt_re/$DEV_NAME
-cd /sys/kernel/config/bnxt_re/$DEV_NAME/ports/1/cc/
-
-#Disabling prio vlan insertion if dscp based pfc is enabled
-if [ $ENABLE_DSCP_BASED_PFC -eq 1 ]
-then
-	echo -n 0x1 > disable_prio_vlan_tx
-else
-	echo -n 0x0 > disable_prio_vlan_tx
-fi
-
-if [ $ENABLE_CC -eq 1 ]
-then
-	echo "Setting up CC Settings"
-	echo -n 0x1 > ecn_marking
-	echo -n 0x1 > ecn_enable
-	echo -n 1 > cc_mode
-else
-	echo -n 0x0 > ecn_marking
-	echo -n 0x0 > ecn_enable
-fi
-
-if [ $CNP_SERVICE_TYPE != 1 ]
-then
-	if [ ! -z "$ROCE_CNP_PRI" ]
-	then
-		echo -n $ROCE_CNP_PRI > cnp_prio
-	fi
-	if [ ! -z "$ROCE_PRI" ]
-	then
-		echo -n $ROCE_PRI > roce_prio
-	fi
-fi
-
-if [ $ENABLE_DSCP -eq 1 ]
-then
-	echo "Setting up DSCP/PRI"
-	if [ ! -z "$ROCE_DSCP" ]
-	then
-		echo -n $ROCE_DSCP > roce_dscp
-	fi
-	if [ ! -z "$ROCE_CNP_DSCP" ]
-	then
-		echo -n $ROCE_CNP_DSCP > cnp_dscp
-	fi
-fi
-echo -n 0x1 > apply
-
-cd $PREVDIR
-
-echo "Complete"
+rmdir /sys/kernel/config/rdma_cm/$DEV_NAME

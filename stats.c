@@ -291,6 +291,11 @@ static void bnxt_re_copy_ext_stats(struct bnxt_re_dev *rdev,
 	ext_d->grx.rx_bytes = s->rx_roce_good_bytes;
 	ext_d->rx_dcn_payload_cut = s->rx_dcn_payload_cut;
 	ext_d->te_bypassed = s->te_bypassed;
+	ext_d->tx_dcn_cnp = s->tx_dcn_cnp;
+	ext_d->rx_dcn_cnp = s->rx_dcn_cnp;
+	ext_d->rx_payload_cut = s->rx_payload_cut;
+	ext_d->rx_payload_cut_ignored = s->rx_payload_cut_ignored;
+	ext_d->rx_dcn_cnp_ignored = s->rx_dcn_cnp_ignored;
 	e_errs->oob = s->rx_out_of_buffer;
 	e_errs->oos = s->rx_out_of_sequence;
 	e_errs->seq_err_naks_rcvd = s->seq_err_naks_rcvd;
@@ -328,10 +333,61 @@ done:
 	return rc;
 }
 
-static void bnxt_re_copy_rstat(struct bnxt_re_rdata_counters *d,
-			       struct ctx_hw_stats_ext *s,
-			       bool is_p5_p7)
+static void bnxt_re_add_one_ctr(u64 hw, u64 *sw, u64 mask)
 {
+	u64 sw_tmp;
+
+	hw &= mask;
+	sw_tmp = (*sw & ~mask) | hw;
+	if (hw < (*sw & mask))
+		sw_tmp += mask + 1;
+	WRITE_ONCE(*sw, sw_tmp);
+}
+
+static void __bnxt_re_accumulate_stats(__le64 *hw_stats, u64 *sw_stats,
+				       u64 masks, int count, bool ignore_zero)
+{
+	int i;
+
+	for (i = 0; i < count; i++) {
+		u64 hw = le64_to_cpu(READ_ONCE(hw_stats[i]));
+
+		if (ignore_zero && !hw)
+			continue;
+
+		if (masks == -1ULL)
+			sw_stats[i] = hw;
+		else
+			bnxt_re_add_one_ctr(hw, &sw_stats[i], masks);
+	}
+}
+
+static void bnxt_re_copy_rstat(struct bnxt_re_dev *rdev,
+			       struct bnxt_re_rdata_counters *d,
+			       struct bnxt_qplib_stats *stats_mem)
+{
+	struct ctx_hw_stats_ext *hw_stats;
+	struct ctx_hw_stats_ext *s;
+	bool ignore_zero = false;
+	u64 *sw_stats;
+	u64 mask;
+
+	/* P5 Chip bug.  Counter intermittently becomes 0. */
+	if (_is_chip_gen_p5(rdev->chip_ctx)) {
+		mask = mask ? mask : (1ULL << 48) - 1;
+		ignore_zero = true;
+	} else {
+		mask = mask ? mask : -1ULL;
+	}
+
+	hw_stats = stats_mem->cpu_addr;
+	sw_stats = stats_mem->sw_stats;
+
+	__bnxt_re_accumulate_stats((__le64 *)hw_stats, sw_stats,
+				   mask, stats_mem->size / 8, ignore_zero);
+
+	s = (struct ctx_hw_stats_ext *)sw_stats;
+
 	d->tx_ucast_pkts = BNXT_RE_RDATA_STAT(s->tx_ucast_pkts, d->tx_ucast_pkts);
 	d->tx_mcast_pkts = BNXT_RE_RDATA_STAT(s->tx_mcast_pkts, d->tx_mcast_pkts);
 	d->tx_bcast_pkts = BNXT_RE_RDATA_STAT(s->tx_bcast_pkts, d->tx_bcast_pkts);
@@ -350,7 +406,8 @@ static void bnxt_re_copy_rstat(struct bnxt_re_rdata_counters *d,
 	d->rx_ucast_bytes = BNXT_RE_RDATA_STAT(s->rx_ucast_bytes, d->rx_ucast_bytes);
 	d->rx_mcast_bytes = BNXT_RE_RDATA_STAT(s->rx_mcast_bytes, d->rx_mcast_bytes);
 	d->rx_bcast_bytes = BNXT_RE_RDATA_STAT(s->rx_bcast_bytes, d->rx_bcast_bytes);
-	if (is_p5_p7) {
+
+	if (_is_chip_gen_p5_p7(rdev->chip_ctx)) {
 		d->rx_agg_pkts = BNXT_RE_RDATA_STAT(s->rx_tpa_pkt, d->rx_agg_pkts);
 		d->rx_agg_bytes = BNXT_RE_RDATA_STAT(s->rx_tpa_bytes, d->rx_agg_bytes);
 		d->rx_agg_events = BNXT_RE_RDATA_STAT(s->rx_tpa_events, d->rx_agg_events);
@@ -358,18 +415,17 @@ static void bnxt_re_copy_rstat(struct bnxt_re_rdata_counters *d,
 	}
 }
 
-static void bnxt_re_get_roce_data_stats(struct bnxt_re_dev *rdev)
+void bnxt_re_get_roce_data_stats(struct bnxt_re_dev *rdev)
 {
-	bool is_p5_p7 = _is_chip_gen_p5_p7(rdev->chip_ctx);
 	struct bnxt_re_rdata_counters *rstat;
 
 	rstat = &rdev->stats.dstat.rstat[0];
-	bnxt_re_copy_rstat(rstat, rdev->qplib_res.hctx->stats.dma, is_p5_p7);
+	bnxt_re_copy_rstat(rdev, rstat, &rdev->qplib_res.hctx->stats);
 
 	/* Query second port if LAG is enabled */
 	if (rdev->binfo) {
 		rstat = &rdev->stats.dstat.rstat[1];
-		bnxt_re_copy_rstat(rstat, rdev->qplib_res.hctx->stats2.dma, is_p5_p7);
+		bnxt_re_copy_rstat(rdev, rstat, &rdev->qplib_res.hctx->stats2);
 	}
 }
 

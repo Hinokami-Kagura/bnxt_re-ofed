@@ -182,6 +182,8 @@ struct bnxt_qplib_tlv_modify_cc_req {
 	__le64					tlvpad;
 	struct cmdq_modify_roce_cc_gen1_tlv	ext_req;
 	struct cmdq_modify_roce_cc_gen2_tlv	ext2_req;
+	struct cmdq_modify_roce_cc_gen1_ext_tlv gen1_ext_req;
+	struct cmdq_modify_roce_cc_gen2_ext_tlv gen2_ext_req;
 };
 
 struct bnxt_qplib_tlv_query_rcc_sb {
@@ -189,5 +191,7 @@ struct bnxt_qplib_tlv_query_rcc_sb {
 	struct creq_query_roce_cc_resp_sb		base_sb;
 	struct creq_query_roce_cc_gen1_resp_sb_tlv	gen1_sb;
 	struct creq_query_roce_cc_gen2_resp_sb_tlv	gen2_sb;
+	struct creq_query_roce_cc_gen1_ext_resp_sb_tlv	gen1_ext_sb;
+	struct creq_query_roce_cc_gen2_ext_resp_sb_tlv	gen2_ext_sb;
 };
 #endif /* __QPLIB_TLV_H__ */

@@ -454,7 +454,7 @@ int bnxt_re_get_hw_stats(struct ib_device *ibdev,
 
 	bnxt_re_copy_err_stats(rdev, stats, err_s);
 
-	if (rdev->dbr_pacing)
+	if (_is_chip_gen_p5_p7(rdev->chip_ctx) && rdev->dbr_pacing)
 		bnxt_re_copy_db_pacing_stats(rdev, stats);
 
 	if (bnxt_ext_stats_supported(rdev->chip_ctx, rdev->dev_attr->dev_cap_flags,

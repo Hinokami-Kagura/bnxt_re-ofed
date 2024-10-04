@@ -1476,8 +1476,6 @@ static void __filter_modify_flags(struct bnxt_qplib_qp *qp)
 					CMDQ_MODIFY_QP_MODIFY_MASK_PATH_MTU;
 				qp->path_mtu = CMDQ_MODIFY_QP_PATH_MTU_MTU_2048;
 			}
-			qp->modify_flags &=
-				~CMDQ_MODIFY_QP_MODIFY_MASK_VLAN_ID;
 			/* Bono FW requires the max_dest_rd_atomic to be >= 1 */
 			if (qp->max_dest_rd_atomic < 1)
 				qp->max_dest_rd_atomic = 1;
@@ -1557,7 +1555,8 @@ int bnxt_qplib_modify_qp(struct bnxt_qplib_res *res, struct bnxt_qplib_qp *qp)
 		    is_optimized_state_transition(qp))
 			bnxt_set_mandatory_attributes(qp, &req);
 	}
-
+	if (qp->udcc_exclude)
+		req.flags |= CMDQ_MODIFY_QP_FLAGS_EXCLUDE_QP_UDCC;
 	bmask = qp->modify_flags;
 	req.modify_mask = cpu_to_le32(qp->modify_flags);
 	req.qp_cid = cpu_to_le32(qp->id);
@@ -1652,7 +1651,16 @@ int bnxt_qplib_modify_qp(struct bnxt_qplib_res *res, struct bnxt_qplib_qp *qp)
 		req.tos_dscp_tos_ecn |=
 			((qp->tos_dscp << CMDQ_MODIFY_QP_TOS_DSCP_SFT) &
 			 CMDQ_MODIFY_QP_TOS_DSCP_MASK);
-	req.vlan_pcp_vlan_dei_vlan_id = cpu_to_le16(qp->vlan_id);
+	if (bmask & CMDQ_MODIFY_QP_MODIFY_MASK_VLAN_ID) {
+		req.vlan_pcp_vlan_dei_vlan_id =
+			((res->sgid_tbl.tbl[qp->ah.sgid_index].vlan_id <<
+			 CMDQ_MODIFY_QP_VLAN_ID_SFT) &
+			 CMDQ_MODIFY_QP_VLAN_ID_MASK);
+		req.vlan_pcp_vlan_dei_vlan_id |=
+			((qp->ah.sl << CMDQ_MODIFY_QP_VLAN_PCP_SFT) &
+			 CMDQ_MODIFY_QP_VLAN_PCP_MASK);
+		req.vlan_pcp_vlan_dei_vlan_id = cpu_to_le16(req.vlan_pcp_vlan_dei_vlan_id);
+	}
 	bnxt_qplib_fill_cmdqmsg(&msg, &req, &resp, NULL, sizeof(req),
 				sizeof(resp), 0);
 	msg.qp_state = qp->state;
@@ -1758,7 +1766,12 @@ int bnxt_qplib_query_qp(struct bnxt_qplib_res *res, struct bnxt_qplib_qp *qp)
 	qp->max_inline_data = le32_to_cpu(sb->max_inline_data);
 	qp->dest_qpn = le32_to_cpu(sb->dest_qp_id);
 	memcpy(qp->smac, sb->src_mac, ETH_ALEN);
-	qp->vlan_id = le16_to_cpu(sb->vlan_pcp_vlan_dei_vlan_id);
+	qp->vlan_id = le16_to_cpu(sb->vlan_pcp_vlan_dei_vlan_id) &
+				CREQ_QUERY_QP_RESP_SB_VLAN_ID_MASK >>
+				CREQ_QUERY_QP_RESP_SB_VLAN_ID_SFT;
+	qp->ah.sl = le16_to_cpu(sb->vlan_pcp_vlan_dei_vlan_id) &
+				CREQ_QUERY_QP_RESP_SB_VLAN_PCP_MASK >>
+				CREQ_QUERY_QP_RESP_SB_VLAN_PCP_SFT;
 	qp->port_id = le16_to_cpu(sb->port_id);
 bail:
 	dma_free_coherent(&rcfw->pdev->dev, sbuf.size,
@@ -2498,7 +2511,8 @@ void bnxt_qplib_post_recv_db(struct bnxt_qplib_qp *qp)
 {
 	struct bnxt_qplib_q *rq = &qp->rq;
 
-	bnxt_qplib_ring_prod_db(&rq->dbinfo, DBC_DBC_TYPE_RQ);
+	if (unlikely(qp->cur_qp_state != CMDQ_MODIFY_QP_NEW_STATE_INIT))
+		bnxt_qplib_ring_prod_db(&rq->dbinfo, DBC_DBC_TYPE_RQ);
 }
 
 void bnxt_re_handle_cqn(struct bnxt_qplib_cq *cq)
@@ -2985,6 +2999,12 @@ void bnxt_qplib_mark_qp_error(void *qp_handle)
 	/* Must block new posting of SQ and RQ */
 	qp->cur_qp_state = CMDQ_MODIFY_QP_NEW_STATE_ERR;
 	qp->state = qp->cur_qp_state;
+
+	set_bit(QP_FLAGS_CAPTURE_SNAPDUMP, &qp->flags);
+	set_bit(CQ_FLAGS_CAPTURE_SNAPDUMP, &qp->scq->flags);
+	set_bit(CQ_FLAGS_CAPTURE_SNAPDUMP, &qp->rcq->flags);
+	if (qp->srq)
+		set_bit(SRQ_FLAGS_CAPTURE_SNAPDUMP, &qp->srq->flags);
 
 	/* Add qp to flush list of the CQ */
 	if (!qp->is_user)

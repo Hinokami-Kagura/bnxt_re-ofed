@@ -102,6 +102,10 @@ struct bnxt_qplib_srq {
 	bool				small_recv_wqe_sup;
 	u8				toggle;
 	spinlock_t			lock;
+	unsigned long			flags;
+#define SRQ_FLAGS_CAPTURE_SNAPDUMP	1
+	struct ib_umem			*srqprod;
+	struct ib_umem			*srqcons;
 };
 
 struct bnxt_qplib_sge {
@@ -399,6 +403,9 @@ struct bnxt_qplib_qp {
 	u32				msn;
 	u32				msn_tbl_sz;
 	bool				is_host_msn_tbl;
+	bool				udcc_exclude;
+	unsigned long			flags;
+#define QP_FLAGS_CAPTURE_SNAPDUMP	1
 };
 
 #define CQE_CMP_VALID(hdr, pass)				\
@@ -491,6 +498,7 @@ struct bnxt_qplib_cq {
 #define CQ_RESIZE_WAIT_TIME_MS		500
 	unsigned long			flags;
 #define CQ_FLAGS_RESIZE_IN_PROG		1
+#define CQ_FLAGS_CAPTURE_SNAPDUMP	2
 	wait_queue_head_t		waitq;
 	spinlock_t			flush_lock; /* lock flush queue list */
 	spinlock_t			compl_lock; /* synch CQ handlers */

@@ -21,7 +21,6 @@ Table of Contents
   Limitations
   BNXT_RE Dynamic Debug Messages
   BNXT_RE Compiler Switches
-  BNXT_RE Driver Defaults
   DCB Settings
   Congestion Control
   SR-IOV and VF Resource Distribution
@@ -52,27 +51,8 @@ The RoCE driver has dependencies on the bnxt_en Ethernet counterpart.
 BNXT_RE Driver compilation
 ==========================
 
-bnxt_re driver compilation depends on whether IB stack is available along with
-the OS distribution or an external OFED is required.
-
- => Distros that has IB Stack available along with OS distribution:
-    RH 7.9, 8.x, RH 9.x, SLES12SPx, SLES15SPx, Ubuntu 20.04, Ubuntu 22.04.
-    All kernels from 4.5.x onwards
-
 To compile bnxt_re:
         - Untar netxtreme-bnxt_en-<version>.tar.gz
-	$make
-
- => Some older distros that doesn't have RoCE v2 support needs upstream OFED
-
-    Please refer OFED release notes from the following link and install
-    OFED before compiling bnxt_re driver.
-    http://downloads.openfabrics.org/downloads/OFED/release_notes/OFED_3.18-2_release_notes
-
-     To compile bnxt_re:
-	$export OFED_VERSION=OFED-4.8
-		- For OFEDs other than 4.8, 4.8 needs to be updated
-		  with the current OFED version installed on the system
 	$make
 
  => The bnxt_en driver must be built first before building the bnxt_re driver.
@@ -122,6 +102,15 @@ Configuration Tips
    For multiple instances of ib_send_bw/ib_read_bw/ib_write_bw, which creates
    total of 64K QPs, specify higher ack timeout in each application instance
    using -u 24.
+
+- Upon extensive QP scaling testing, it is highly possible that "oom-killer" invokes and
+  kills the applications due to lack of memory.
+
+  Example - 32 instances of below command need ~136GB RAM.
+  ib_send_bw -d bnxt_re0 -F -i 1 -s 128K -m 1024 -x 3 -p $port -t 1000 -c RC -u 21 -Q 100 -D 10 -q 2048 -r 500 --mr_per_qp --send_sge_per_wqe 8
+
+  It is required to observe the reason for oom-killer and check if enough RAM is available
+  to support such workload.
 
 Limitations
 ===========
@@ -230,6 +219,13 @@ Limitations
   want more completion vectors for RoCE (ie. upto 64 or num_cpus), unload
   bnxt_re driver, reduce the L2 rings using ethtool and then load RoCE driver.
 
+- Driver supports display of UDCC session statistics through debugfs.
+  In case true flow module is not able to create the session for any
+  reason, debugfs will endup having stale UDCC session entries and
+  session queries of those returns "Input/output error". At later
+  point of time if the sessions are created with the same session ids,
+  the same entries will be reused.
+
 BNXT_RE Dynamic Debug Messages
 ==============================
 The bnxt_re driver supports the Linux dynamic debug feature.
@@ -275,64 +271,30 @@ ENABLE_FP_SPINLOCAK - Enable spinlocks on the fast path bnxt_qplib queue
 
 ENABLE_DEBUG_SGE - Enable the dumping of SGE info to the journal log
 
-BNXT_RE Driver Defaults
-=======================
-Driver enables #3 traffic classes (L2, RoCE and CNP) during the load.
-Driver configures the default RoCE and CNP priorities and DSCP values and
-enable PFC and CC by default. No other configuration required on the host
-if the switches are configured with default values.
-
-Following are the default CC/QoS values.
-
-Default priority and DSCP
--------------------------
-RoCE Traffic Priority: 3
-RoCE Traffic DSCP: 26
-CNP Traffic Priority: 7
-CNP Traffic DSCP: 48
-
-Default traffic classes
-----------------------
-TC0: L2 traffic
-TC1: RoCE Traffic
-TC2: CNP Traffic
-
-Default PFC priority
---------------------
-Enabled for priority 3
-
-Default ETS Configuration
--------------------------
-Assigned bandwidth to L2 traffic: 50%
-Assigned bandwidth to RoCE traffic: 50%
-
 DCB Settings
 ============
 
-The users can change the above default values using bnxt_setupcc.sh or
-other tools. PFC settings can be configured with bnxtqos/niccli/lldptool etc.
-While adding new settings, please make sure that the default settings
-(say, app TLVs, ETS configuration, PFC config etc) are removed, before programming
-the new values. Refer the below section "Removing the RoCE Driver default DCB settings"
-to remove the default RoCE configurations.
+The current software requires the following Traffic Class mapping.
 
-Note: Since bnxt_re driver enables PFC on ROCE Priority during driver load,
-      PFC must be disabled using bnxtqos/lldptool before changing any TC
-      mapping. This ensures proper mapping between the user traffic class
-      to HW Queues.
+TC0: L2 traffic
+TC1: RoCE Traffic
+TC2: CNP Traffic and L2 Traffic
+TC3 – TC7: L2 traffic
 
-Note: Unloading bnxt_re driver would change the current DCBx settings on
-      the adapter. This might include some of the settings done by users
-      after loading bnxt_re. This is applicable to LAG create/delete operation.
-      i.e. User has to clear and re-configure DCB settings after unload/load of
-      the bnxt_re driver or create/destroy of the RoCE LAG.
+Each TC can be mapped to different priority. So while mapping priority to traffic
+class, make sure that TC1 is mapped for RoCE priority and TC2 is mapped for CNP priority.
+RoCE traffic class support only one DSCP value programmed through the DSCP App TLV.
 
-      To confirm the dcbx settings,  use bnxtqos or lldptool as following.
+Since the CNP Traffic class (TC2) is shared between CNP and L2 traffic, multiple DSCP
+values are supported for this traffic class.  The current solution requires that the DSCP
+App TLV for CNP should be programmed at the end, after programming other App TLVs. If
+there are any changes(add/delete) in the dscp configuration of CNP traffic class,
+user needs to re-program the dscp values used for CNP packets.
 
-	$lldptool get-tlv -n -i <eth x>
-	or
-	$ bnxtqos -dev=p6p1 get_qos
-
+Users can program using tools such as bnxtqos/niccli/lldptool or
+by installing the bnxt_re_conf package distributed by Broadcom.
+While adding new settings, please make sure that the existing settings
+(say, app TLVs, ETS configuration, PFC config etc) are removed.
 
 Example usages of bnxtqos and lldptool is given below.
 
@@ -424,20 +386,6 @@ echo 1 > /sys/kernel/config/bnxt_re/bnxt_re0/ports/1/cc/disable_prio_vlan_tx
 Guidelines for changing DCB settings
 ------------------------------------
 
-The current software requires the following Traffic Class mapping.
-
-TC0: L2 traffic
-TC1: RoCE Traffic
-TC2: CNP Traffic and L2 Traffic
-TC3 – TC7: L2 traffic
-
-Each TC can be mapped to different priority. So while mapping priority to traffic
-class, make sure that TC1 is mapped for RoCE priority and TC2 is mapped for CNP priority.
-RoCE traffic class support only one DSCP value programmed through the DSCP App TLV. Since
-the CNP Traffic class (TC2) is shared between CNP and L2 traffic, multiple DSCP values are
-supported for this traffic class.  The current solution requires that the DSCP App TLV
-for CNP should be programmed at the end, after programming other App TLVs.
-
 Sample programming for multiple DSCP values for TC2.
 TC1 RoCE pri – 5
 TC1 RoCE dscp – 59
@@ -462,15 +410,73 @@ bnxtqos -dev=enp37s0f0np0 set_apptlv app=6,5,54
 bnxtqos -dev=enp37s0f0np0 set_apptlv app=6,5,55
 bnxtqos -dev=enp37s0f0np0 set_apptlv app=6,5,49
 
-Removing the RoCE Driver default DCB settings
----------------------------------------------
+bnxt_re_conf package to program DCB
+-----------------------------------
+
+A udev rule should be installed to program the default DCB setting upon RoCE driver
+load. User will have the flexibility to modify the default values programmed
+by the udev rule through a config file. User can also opt to not run the udev rule
+upon a RoCE driver load.
+The udev rule, scripts and config file will be part of an installer package(bnxt_re_conf).
+
+The entire mechanism(udev->bnxt_re_conf.sh->bnxt_setupcc.sh) involves a
+udev rule(90-bnxt_re.rules) that is triggered when the bnxt_re device is added.
+The udev rule invokes a wrapper script(bnxt_re_conf.sh) that would take values
+of the required parameters from a config file as mentioned below and will run
+the configuration using bnxt_setupcc.sh.
+
+The config file parameters are as follows:
+
+ENABLE_FC: Enables flow control. Default 1.
+           If set to 0, then no configuration action is taken. User has to manually configure the RoCE lossless configuration.
+
+FC_MODE -m [1-3]: Selects the mode of operation regarding Priority Flow Control (PFC) and Congestion Control (CC).
+                  1: PFC only
+                  2: CC only
+                  3: Both PFC and CC
+
+ROCE_PRI -r [0-7]: Sets the RoCE packet priority. The range 0-7 corresponds to the possible priority levels in Ethernet frames.
+
+ROCE_DSCP -s VALUE: Sets the RoCE Packet DSCP (Differentiated Services Code Point) value, used in IP headers to determine traffic handling.
+
+CNP_PRI -c [0-7]: Sets the RoCE CNP packet priority.
+
+CNP_DSCP -p VALUE: Sets the DSCP value for RoCE CNP packets.
+
+ROCE_BW -b VALUE: Sets the bandwidth percentage for ETS (Enhanced Transmission Selection) configuration. Default is typically 50%.
+
+UTILITY: Enables the user to select the utility tool to program.
+         3: niccli (only niccli is supported for now)
+
+NOTE: If the user is using the tarball, these files are to be copied to their respected paths as follows:
+        cp bnxt_re.conf /etc/bnxt_re/bnxt_re.conf
+        cp bnxt_re_conf.sh /usr/bin/bnxt_re_conf.sh
+        cp bnxt_setupcc.sh /usr/bin/bnxt_setupcc.sh
+        cp 90-bnxt_re.rules /usr/lib/udev/rules.d/90-bnxt_re.rules
+
+Note: Load the drivers and make sure the udev rule gets invoked correctly.
+      For device with index 1:
+         $ niccli -i 1 get_qos
+
+      Users can see the output of udev rule commands in “/tmp/bnxt_setup_IB_device.log”.
+      Users have to wait until the udev rule has executed successfully on all the IB devices.
+      If there are multiple IB devices registered, running the udev rule on all devices may take time as the operation is serial.
+
+Note: If the user doesn't want to install the bnxt_re_conf package and the utilities,
+      please configure the RoCE lossless configuration by using bnxt_setupcc.sh or steps mentioned in the above section.
+
+Note: The bnxt_re_conf script udev rule supports programing NIC profiles with 3 TCs(MP 12) or with 8 TCs(MP 17) only.
+      For other profiles, user has to disable the udev rule and program manually.
+
+Removing the DCB settings
+-------------------------
 RoCE driver gets auto loaded by a udev rule as soon as L2 interface is detected.
 If users want to change the Traffic class mapping using tools like tc qdisc,
 lldptool, bnxtqos, niccli etc, remove the existing settings configured
-by RoCE driver to avoid Traffic class mapping errors.
+to avoid Traffic class mapping errors.
 
-Use the following commands as reference to remove the settings
-configured by RoCE driver. Users can setup new configuration after this.
+Use the following commands as reference to remove the settings.
+Users can setup new configuration after this.
 
 #Example commands using niccli ( Get the interface id from command 'niccli.x86_64 --list')
 
@@ -563,6 +569,16 @@ kernel. Following are the steps to configure congestion control parameters.
 		2.i Read back a specific parameter
 			cat roce_dscp
 			...
+
+		2.j Read back all parameters
+			cat apply
+			cat ext_settings
+		Note: "cat apply" is displaying the basic parameter set from HW.
+		      "cat ext_settings" is displaying the extended parameter set from HW.
+		      If a specific parameter value is changed in HW without being programmed
+		      through config interface, the up-to-date value will be displayed through
+		      one of these two commands. It may be different from what displayed with
+		      step 2.i.
 
 	3. Unmount per-port-configfs interface
 	   ====================================
@@ -794,28 +810,30 @@ Max MR		Max number of memory region limit
 Max MW		Max number of memory window limit
 
 Active Resources:
-Active QP	Number of active QPs
-Active SRQ	Number of active SRQs
-Active CQ	Number of active CQs
-Active MR	Number of active Memory Regions
-Active MW	Number of active Memory Windows
-Active RC QP	Number of active RC QPs
-Active UD QP	Number of active UD QPs
+Active QP		Number of active QPs
+Active SRQ		Number of active SRQs
+Active CQ		Number of active CQs
+Active MR		Number of active Memory Regions
+Active DMABUF MR 	Number of active DMABUF Memory Regions
+Active MW		Number of active Memory Windows
+Active RC QP		Number of active RC QPs
+Active UD QP		Number of active UD QPs
 
 Note: HW uses the same resource pages for MR and MW.
  So the total number of  Active MR and Active MW should
  be less than or equal to Max MR/MW.
 
 Resource Watermarks:
-QP Watermark	Max QPs active after driver load
-SRQ Watermark   Max SRQs active after driver load
-CQ Watermark    Max CQs active after driver load
-MR Watermark    Max MRs active after driver load
-MW Watermark    Max MWs active after driver load
-AH Watermark    Max AHs active after driver load
-PD Watermark    Max PDs active after driver load
-RC QP Watermark	Max RC QPs active after driver load
-UD QP Watermark	Max UD QPs active after driver load
+QP Watermark		Max QPs active after driver load
+SRQ Watermark   	Max SRQs active after driver load
+CQ Watermark    	Max CQs active after driver load
+MR Watermark    	Max MRs active after driver load
+DMABUF MR Watermark 	Max DMABUF MRs active after driver load
+MW Watermark    	Max MWs active after driver load
+AH Watermark    	Max AHs active after driver load
+PD Watermark   	 	Max PDs active after driver load
+RC QP Watermark		Max RC QPs active after driver load
+UD QP Watermark		Max UD QPs active after driver load
 
 Byte and Packet Counters:
 Rx Pkts	 	Number of RoCE packets received
@@ -878,6 +896,14 @@ latency_slab		Each slab is of 1 second granularity. The Counters of each slab re
 			Upto 128 seconds latency is tracked.
 rx_dcn_payload_cut	Number of received DCN payload cut packets.
 te_bypassed		Number of transmitted packets that bypassed the transmit engine.
+tx_dcn_cnp		Number of transmitted DCN CNP packets.
+rx_dcn_cnp		Number of received DCN CNP packets.
+rx_payload_cut		Number of received DCN payload cut packets.
+rx_payload_cut_ignored	Number of received DCN payload cut packets that are ignored
+			because they failed the PSN checks.
+rx_dcn_cnp_ignored	Number of received DCN CNP packets that are ignored either
+			because the ECN is not enabled on the QP or the ECN is enabled
+			but the CNP packets do not pass the packet validation checks.
 
 Recoverable Errors:
 Recoverable Errors	Number of recoverable errors detected.  Recoverable errors are
@@ -955,6 +981,9 @@ res_cq_load_err		Number of times HW detected error while attempting to load the 
 res_srq_load_err	Number of times HW detected error while attempting to load the SRQ context.
 
 Note: When a LAG is created, all the statistics are reported on function 0 of the device.
+
+Driver provides additional debug information useful for dev debugging.
+This can be read from /sys/kernel/debug/bnxt_re/bnxt_re<x>/drv_dbg_stats.
 
 BNXT_RE SLOW PATH PERF STATS
 ============================

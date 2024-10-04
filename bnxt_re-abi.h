@@ -122,6 +122,8 @@ struct bnxt_re_cq_req {
 	__u64 cq_handle;
 	__aligned_u64 comp_mask;
 	__u16 cq_capability;
+	__u64 cqprodva;
+	__u64 cqconsva;
 } __attribute__((packed));
 
 struct bnxt_re_cq_resp {
@@ -145,6 +147,10 @@ struct bnxt_re_qp_req {
 	__u64 qpsva;
 	__u64 qprva;
 	__u64 qp_handle;
+	__u64 sqprodva;
+	__u64 sqconsva;
+	__u64 rqprodva;
+	__u64 rqconsva;
 } __attribute__((packed));
 
 struct bnxt_re_qp_resp {
@@ -157,6 +163,8 @@ struct bnxt_re_qp_resp {
 struct bnxt_re_srq_req {
 	__u64 srqva;
 	__u64 srq_handle;
+	__u64 srqprodva;
+	__u64 srqconsva;
 } __attribute__((packed));
 
 struct bnxt_re_srq_resp {

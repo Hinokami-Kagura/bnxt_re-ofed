@@ -91,8 +91,8 @@
 #include "compat.h"
 
 #define ROCE_DRV_MODULE_NAME		"bnxt_re"
-#define ROCE_DRV_MODULE_VERSION "230.2.52.0"
-#define ROCE_DRV_MODULE_RELDATE "June 10, 2024"
+#define ROCE_DRV_MODULE_VERSION "231.0.162.0"
+#define ROCE_DRV_MODULE_RELDATE "September 20, 2024"
 
 #define BNXT_RE_REF_WAIT_COUNT		20
 #define BNXT_RE_ROCE_V1_ETH_TYPE	0x8915
@@ -347,18 +347,18 @@ struct bnxt_dbq_nq_list {
 	  BNXT_RE_ASYNC_ERR_REP_BASE(TYPE_MASK))  >>			\
 	 BNXT_RE_ASYNC_ERR_REP_BASE(TYPE_SFT))
 
-#define BNXT_RE_DBR_LIST_ADD(_rdev, _res, _type)			\
+#define BNXT_RE_RES_LIST_ADD(_rdev, _res, _type)			\
 {									\
 	spin_lock(&(_rdev)->res_list[_type].lock);			\
-	list_add_tail(&(_res)->dbr_list,				\
+	list_add_tail(&(_res)->res_list,				\
 		      &(_rdev)->res_list[_type].head);			\
 	spin_unlock(&(_rdev)->res_list[_type].lock);			\
 }
 
-#define BNXT_RE_DBR_LIST_DEL(_rdev, _res, _type)			\
+#define BNXT_RE_RES_LIST_DEL(_rdev, _res, _type)			\
 {									\
 	spin_lock(&(_rdev)->res_list[_type].lock);			\
-	list_del(&(_res)->dbr_list);					\
+	list_del(&(_res)->res_list);					\
 	spin_unlock(&(_rdev)->res_list[_type].lock);			\
 }
 
@@ -402,10 +402,11 @@ enum {
 	BNXT_RE_RES_TYPE_UCTX,
 	BNXT_RE_RES_TYPE_QP,
 	BNXT_RE_RES_TYPE_SRQ,
+	BNXT_RE_RES_TYPE_MR,
 	BNXT_RE_RES_TYPE_MAX
 };
 
-struct bnxt_re_dbr_res_list {
+struct bnxt_re_res_list {
 	struct list_head head;
 	spinlock_t lock;
 };
@@ -419,6 +420,13 @@ struct bnxt_re_dbr_drop_recov_work {
 struct bnxt_re_aer_work {
 	struct work_struct work;
 	struct bnxt_re_dev *rdev;
+};
+
+struct bnxt_re_udcc_work {
+	struct work_struct work;
+	struct bnxt_re_dev *rdev;
+	u32 session_id;
+	u8 session_opcode;
 };
 
 struct bnxt_re_dbq_stats {
@@ -466,6 +474,7 @@ struct bnxt_re_ppp_sw_stats {
 	u32 ppp_enabled_qps;
 };
 
+#define BNXT_RE_UDCC_MAX_SESSIONS	4096
 #define BNXT_RE_UDCC_INPUT_ARG_LENGTH 40
 struct bnxt_re_udcc_cfg {
 	u8		enable;
@@ -516,14 +525,17 @@ struct qdump_element {
 	struct bnxt_qplib_pbl pbl[PBL_LVL_MAX];
 	enum bnxt_qplib_pbl_lvl level;
 	struct bnxt_qplib_hwq *hwq;
+	struct bnxt_re_dev *rdev;
+	struct ib_umem *uaddr_prod;
+	struct ib_umem *uaddr_cons;
 	struct ib_umem *umem;
 	bool is_user_qp;
 	char des[32];
 	char *buf;
 	size_t len;
 	u16 stride;
-	u16 prod;
-	u16 cons;
+	u32 prod;
+	u32 cons;
 };
 
 struct qdump_array {
@@ -545,6 +557,22 @@ struct bnxt_re_qdump_head {
 	u32 index;
 };
 
+#define MAX_DSCP_PRI_TUPLE	64
+#define MAX_LOSS_LESS_QUEUES	4
+
+enum {
+	BNXT_RE_SNAPDUMP_NONE = 0,
+	BNXT_RE_SNAPDUMP_ERR,
+	/* Add new entry before this */
+	BNXT_RE_SNAPDUMP_ALL
+};
+
+struct bnxt_re_udcc_dbg_info {
+	u32				session_id;
+	struct dentry                   *session_dbgfs_dir;
+	struct bnxt_re_dev		*rdev;
+};
+
 struct bnxt_re_dev {
 	struct ib_device		ibdev;
 	struct list_head		list;
@@ -553,7 +581,6 @@ struct bnxt_re_dev {
 	unsigned long			flags;
 #define BNXT_RE_FLAG_NETDEV_REGISTERED		0
 #define BNXT_RE_FLAG_IBDEV_REGISTERED		1
-#define BNXT_RE_FLAG_RECONFIG_SECONDARY_DEV_DCB	3
 #define BNXT_RE_FLAG_ALLOC_RCFW			4
 #define BNXT_RE_FLAG_NET_RING_ALLOC		5
 #define BNXT_RE_FLAG_RCFW_CHANNEL_EN		6
@@ -568,8 +595,7 @@ struct bnxt_re_dev {
 #define BNXT_RE_FLAG_PER_PORT_DEBUG_INFO	15
 #define BNXT_RE_FLAG_DEV_LIST_INITIALIZED	16
 #define BNXT_RE_FLAG_ERR_DEVICE_DETACHED	17
-#define BNXT_RE_FLAG_INIT_DCBX_CC_PARAM		18
-#define BNXT_RE_FLAG_INIT_DCBX_PARAM_ATTEMPTED	19
+#define BNXT_RE_FLAG_INIT_CC_PARAM		18
 #define BNXT_RE_FLAG_STOP_IN_PROGRESS		20
 #define BNXT_RE_FLAG_ISSUE_ROCE_STATS		29
 #define BNXT_RE_FLAG_ISSUE_CFA_FLOW_STATS	30
@@ -620,6 +646,8 @@ struct bnxt_re_dev {
 
 	struct bnxt_re_device_stats	stats;
 	struct bnxt_re_drv_dbg_stats	*dbg_stats;
+	struct bnxt_re_udcc_dbg_info	*udcc_dbg_info;
+	struct workqueue_struct		*udcc_wq;
 	/* debugfs to expose per port information*/
 	struct dentry                   *port_debug_dir;
 	struct dentry                   *info;
@@ -627,6 +655,10 @@ struct bnxt_re_dev {
 	struct dentry                   *sp_perf_stats;
 	struct dentry                   *pdev_debug_dir;
 	struct dentry                   *pdev_qpinfo_dir;
+	struct dentry                   *pdev_debug_dump_dir;
+	struct dentry                   *pte_pbl_info;
+	struct dentry                   *peer_mmap;
+	struct dentry                   *udcc_dbgfs_dir;
 	struct workqueue_struct		*resolve_wq;
 	struct list_head		mac_wq_list;
 	struct workqueue_struct		*dcb_wq;
@@ -643,6 +675,8 @@ struct bnxt_re_dev {
 	struct workqueue_struct		*dbr_drop_recov_wq;
 	struct work_struct		dbq_fifo_check_work;
 	struct delayed_work		dbq_pacing_work;
+#define PEER_MMAP_WORK_SCHED_DELAY	100	/* msecs */
+	struct delayed_work		peer_mmap_work;
 	/* protect DB pacing */
 	struct mutex dbq_lock;
 	/* Control DBR pacing feature. Set if enabled */
@@ -671,7 +705,7 @@ struct bnxt_re_dev {
 	atomic_t dbq_intr_running;
 
 	struct bnxt_re_dbr_sw_stats *dbr_sw_stats;
-	struct bnxt_re_dbr_res_list res_list[BNXT_RE_RES_TYPE_MAX];
+	struct bnxt_re_res_list res_list[BNXT_RE_RES_TYPE_MAX];
 	struct bnxt_dbq_nq_list nq_list;
 #ifdef IB_PEER_MEM_MOD_SUPPORT
 	struct ib_peer_mem_device *peer_dev;
@@ -694,8 +728,17 @@ struct bnxt_re_dev {
 	/* UDCC */
 	struct bnxt_re_udcc_cfg udcc_cfg;
 
+	u8                      p2cos[IEEE_8021QAZ_MAX_TCS];
+	u8                      lossless_q_count;
+	u8                      d2p_count;
+	u8                      *lossless_qid;
+	struct bnxt_re_dscp2pri *d2p;
+
 	/* Head to track all QP dump */
 	struct bnxt_re_qdump_head qdump_head;
+
+	/* Config option to tune QP/MR dbg feature */
+	u8 snapdump_dbg_lvl;
 };
 
 #define bnxt_re_dev_pcifn_id(rdev)	((rdev)->en_dev->pdev->devfn)
@@ -761,7 +804,6 @@ int bnxt_re_set_hwrm_dscp2pri(struct bnxt_re_dev *rdev,
 			      struct bnxt_re_dscp2pri *d2p, u16 count,
 			      u16 target_id);
 int bnxt_re_query_hwrm_dscp2pri(struct bnxt_re_dev *rdev,
-				struct bnxt_re_dscp2pri *d2p, u16 *count,
 				u16 target_id);
 int bnxt_re_query_hwrm_qportcfg(struct bnxt_re_dev *rdev,
 				struct bnxt_re_tc_rec *cnprec, u16 tid);
@@ -772,13 +814,11 @@ int bnxt_re_hwrm_cos2bw_cfg(struct bnxt_re_dev *rdev, u16 target_id,
 int bnxt_re_hwrm_pri2cos_cfg(struct bnxt_re_dev *rdev,
 			     u16 target_id, u16 port_id,
 			     u8 *cos_id_map, u8 pri_map);
-int bnxt_re_init_dcbx_cc_param(struct bnxt_re_dev *rdev);
 
 int bnxt_re_prio_vlan_tx_update(struct bnxt_re_dev *rdev);
 int bnxt_re_get_slot_pf_count(struct bnxt_re_dev *rdev);
 struct bnxt_re_dev *bnxt_re_get_peer_pf(struct bnxt_re_dev *rdev);
 struct bnxt_re_dev *bnxt_re_from_netdev(struct net_device *netdev);
-u8 bnxt_re_get_priority_mask(struct bnxt_re_dev *rdev, u8 selector);
 struct bnxt_qplib_nq * bnxt_re_get_nq(struct bnxt_re_dev *rdev);
 void bnxt_re_put_nq(struct bnxt_re_dev *rdev, struct bnxt_qplib_nq *nq);
 
